@@ -1,0 +1,8 @@
+# 扫描输出，每次跑都变，不入库
+funding_*.csv
+spread_*.csv
+
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
