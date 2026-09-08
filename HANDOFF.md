@@ -41,8 +41,10 @@
   verify 按整周检查，并保留 symbol 防止多合约覆盖。旧 CSV 和状态不重写。
 - 所谓“净 APR”统一解释为“扣手续费后的名义年化估算”，兼容保留旧字段名。
   未计滑点、基差变化、融资费用和总资金占用；没有资金费率入账采集和完整账户收益会计。
-- 下一步是离线回归及账户只读核对；历史中的“小额实盘下一步”不是自动执行授权。
-  本次修改没有连接真实账户、下单、撤单、划转或部署，没有安装 cron。
+- 下一步是配置私有账户环境文件后做账户只读核对；历史中的“小额实盘下一步”不是自动执行授权。
+  本次修改没有下单、撤单或划转；远端只启用了只读监控服务，没有安装交易 cron。
+- 远端用户级 systemd 的 `funding-arb-monitor.service` 当前为 enabled/active，用户 linger 已启用。
+  因 OKX 凭据尚未配置，最新快照为 `CONFIG_MISSING`，不是“无仓位”结论。
 - 使用方式和恢复边界以 README 为准。下文 2026-09-07 的费率、VPS、mock 描述是历史快照，
   不代表当前行情或本次独立验收，不能据此宣称当前代码已实盘验证。
 - 本次离线验证：Python 3.13.7 / ccxt 4.5.77，24 个临时 unittest 用例通过；
@@ -72,7 +74,7 @@
 | `pool.py` | 池子管理：自动配对跨所机会、价差压缩就换仓。复用 `scan.py` 的抓取 | 跑通，空跑 |
 | `trade_a.py` | 模式 A 执行器（okx）：开仓/平仓/查仓 | **只验过 mock，没碰过真账户** |
 | `monitor_a.py` | 只读轮询本地实盘状态与 OKX 账户，写状态快照和日志 | 只读，缺凭据显式报错 |
-| `funding-arb-monitor.service` | 用户级 systemd 常驻监控单元 | 不带 `--live` |
+| `funding-arb-monitor.service` | 用户级 systemd 常驻监控单元 | 不带 `--live`，远端已启用 |
 
 其余：`README.md`（对外说明 + 坑清单）、`LICENSE`（MIT）、`HANDOFF.md`（本文件）。
 运行产物 `funding_*.csv` / `spread_*.csv` / `verify_*.csv` / `positions*.json` / `pool_log.csv` 都在 `.gitignore` 里。
