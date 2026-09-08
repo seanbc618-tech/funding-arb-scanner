@@ -1,6 +1,15 @@
 # 扫描输出，每次跑都变，不入库
 funding_*.csv
 spread_*.csv
+verify_*.csv
+
+# 运行时状态与日志
+positions.json
+positions_a*.json
+positions_a*.tmp
+positions_a*.lock
+pool_log.csv
+pool_run.log
 
 __pycache__/
 *.pyc
