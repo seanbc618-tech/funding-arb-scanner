@@ -9,6 +9,8 @@ positions_a*.json
 positions_a*.tmp
 positions_a*.lock
 accounting_a.sqlite*
+monitor_a_status.json
+monitor_a_status.tmp
 pool_log.csv
 pool_run.log
 

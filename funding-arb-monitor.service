@@ -1,0 +1,18 @@
+[Unit]
+Description=Funding Arb read-only position monitor
+
+[Service]
+Type=simple
+WorkingDirectory=%h/funding-arb
+EnvironmentFile=-%h/.config/funding-arb/monitor.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/funding-arb/.venv/bin/python -B %h/funding-arb/monitor_a.py --account --interval 60
+Restart=always
+RestartSec=15
+UMask=0077
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

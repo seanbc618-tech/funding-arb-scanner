@@ -46,7 +46,7 @@ python3 trade_a.py close ZEC
 它只查询原订单并核对账户，不补开、不重发、不自动撤单或回滚；查不到订单仍保留待核对记录。
 确认后 `close ZEC --live` 按余量退出。每条腿成交后立即保存，部分平仓可再次 close；
 低于最小数量的尘埃保留待人工处理。已平仓流水保留，status 会核对实际账户与本地余量。
-真实账户和无人值守运行仍未验收；本项目没有安装任何定时任务。
+真实账户和无人值守运行仍未验收；本项目没有安装任何交易定时任务。
 
 ## 模式 A 记账、检查与管理
 
@@ -137,7 +137,30 @@ python3 notify_run.py scan.py                  # 扫描结束报告
 指定插件脚本、私有配置和 Python。也可沿用插件的 `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID`。
 通知不确认时退出码为 2（业务本身失败则保留业务退出码），先检查群消息，禁止盲目重跑交易。
 包装器不会追加 `--live`、自动恢复或启动定时任务；直接运行原脚本不会发送通知。
-目前是按次运行通知，不是后台持续实时监控；VPS 尚未配置插件凭据或部署本轮新增模块。
+Telegram 通知目前仍是本机按次调用；常驻持仓监控由独立的只读 systemd 服务负责，远端 OKX 凭据需另存为私有环境文件。
+
+### 常驻只读持仓监控
+
+`monitor_a.py` 只查询本地实盘状态和 OKX 账户，不调用任何下单、撤单或平仓函数。
+`--account` 需要 `OKX_API_KEY` / `OKX_SECRET` / `OKX_PASSWORD`；缺凭据时明确报告
+`CONFIG_MISSING`，不会把“查不到账户”误报成“无仓位”。每轮 JSON 同时输出到日志并原子写入
+`monitor_a_status.json`（权限 600）。
+
+VPS 使用用户级 systemd（不需要 root）：
+
+```bash
+mkdir -p ~/.config/funding-arb
+chmod 700 ~/.config/funding-arb
+# 在 ~/.config/funding-arb/monitor.env 中写入三项私有 OKX_* 凭据，chmod 600
+systemctl --user daemon-reload
+systemctl --user enable --now funding-arb-monitor.service
+systemctl --user status funding-arb-monitor.service
+journalctl --user -u funding-arb-monitor.service -f
+cat ~/funding-arb/monitor_a_status.json
+```
+
+本服务没有 `--live` 参数，不会自动交易。当前 Telegram Notifier 是本机插件；未把 Token
+复制到仓库或远端。若要远端持续推送 Telegram，需另行把私有通知配置放在远端，再接入通知命令。
 
 | 参数 | 默认 | 含义 |
 |------|------|------|

@@ -5,7 +5,8 @@
 - 已使用用户插件向“情报小分队”发送一次 VPS 只读状态简报。
 - 新增 `notify_run.py` 复用插件 CLI，业务命令结束后发送白名单摘要，通知失败不重跑业务或重发消息。
   配置与 Token 留在插件私有配置中，不复制入库；用法见 README。
-- 仅接入本地按次运行入口；未安装 cron，也未把通知插件或本轮功能模块部署到 VPS。
+- `monitor_a.py` 和 `funding-arb-monitor.service` 提供只读常驻持仓监控；不带 `--live`，只写状态快照和用户日志。
+  Telegram 插件仍只在本机按次调用，Token 未复制到仓库或 VPS。
 
 ## 模式 A 功能补齐（本轮更新，优先于下文）
 
@@ -15,9 +16,11 @@
 - 新增 `check_a.py`：订单簿数量/VWAP/时效、基差、可用资金、保证金率、清算距离和净敞口。
 - 新增 `manage_a.py`：单次只读退出建议；`--account` 只读真实账户，只有 `--live` 才执行 EXIT。
   用户选定保守默认：资料不全暂停，费率负值、保证金/清算距离越线建议退出。
-  具体阈值和 CLI 见 README；无自动开仓、资金划转、杠杆修改或新增定时任务。
+  具体阈值和 CLI 见 README；无自动开仓、资金划转、杠杆修改或新增交易定时任务。
 - `trade_a.py` 接入开仓检查，真实订单改为带限价的 IOC，平仓仍 reduceOnly；
   每笔订单保存盘口依据，成交按原订单核验，未完成余量持续保留。
+- `monitor_a.py` 轮询 OKX 账户仓位、余额和保证金资料，与本地实盘状态比对；缺凭据、缺清算数据、
+  API 异常和未归属仓位都保留为显式状态，不把它们折叠成“无仓”。
 - 会计只提供策略归属损益；总资本收益率不补造。供应商迟发账单仍需复查。
 - 本轮仅本地离线验证：原有 24 个及新增 29 个用例共 53 个通过。
   临时脚本：`funding_arb_regression.py`、`funding_modules_regression.py`（系统临时目录）。
@@ -68,6 +71,8 @@
 | `verify.py` | 拉 28 天历史按周切片，验证费率偏差是不是稳定的（不是一天的噪音） | 跑通 |
 | `pool.py` | 池子管理：自动配对跨所机会、价差压缩就换仓。复用 `scan.py` 的抓取 | 跑通，空跑 |
 | `trade_a.py` | 模式 A 执行器（okx）：开仓/平仓/查仓 | **只验过 mock，没碰过真账户** |
+| `monitor_a.py` | 只读轮询本地实盘状态与 OKX 账户，写状态快照和日志 | 只读，缺凭据显式报错 |
+| `funding-arb-monitor.service` | 用户级 systemd 常驻监控单元 | 不带 `--live` |
 
 其余：`README.md`（对外说明 + 坑清单）、`LICENSE`（MIT）、`HANDOFF.md`（本文件）。
 运行产物 `funding_*.csv` / `spread_*.csv` / `verify_*.csv` / `positions*.json` / `pool_log.csv` 都在 `.gitignore` 里。
