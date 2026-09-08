@@ -105,6 +105,10 @@ def resolve(ex, d, p):
     if not o:
         return
     result = ex.fetch_order(None, o['symbol'], {'clOrdId': o['client_id']})
+    if result.get('clientOrderId') not in (None, o['client_id']):
+        raise RuntimeError('客户订单号不匹配')
+    if result.get('symbol') not in (None, o['symbol']) or result.get('side') not in (None, o['side']):
+        raise RuntimeError('订单身份不匹配')
     if result.get('status') not in ('closed', 'canceled', 'expired', 'rejected'):
         raise RuntimeError('订单尚未终结；运行 recover 查询，禁止继续另一腿')
     filled = number(result['filled'])
@@ -140,16 +144,19 @@ def order(ex, d, p, leg, side, qty):
         p['orders'].append({'symbol': sym, 'side': side, 'amount': qty, 'simulated': True})
         save(d)
         return
+    from check_a import execution
+    quote = execution(ex, sym, side, qty)
     o = {'client_id': uuid.uuid4().hex, 'symbol': sym, 'side': side,
          'leg': leg, 'amount': qty, 'submitted_at': time.time()}
+    o['execution_quote'] = quote
     p['pending'] = o
     save(d)
     params = {'clOrdId': o['client_id']}
-    params.update({'tdMode': 'cash', 'tgtCcy': 'base_ccy', 'banAmend': True}
+    params.update({'tdMode': 'cash'}
                   if leg == 'base' else
                   {'tdMode': 'cross', 'posSide': 'net', 'reduceOnly': side == 'buy'})
     try:
-        ex.create_order(sym, 'market', side, qty, None, params)
+        ex.create_order(sym, 'ioc', side, qty, quote['limit_price'], params)
     except Exception:
         # 响应异常也只查询原单；不重发、不盲目回滚。
         resolve(ex, d, p)
@@ -157,14 +164,10 @@ def order(ex, d, p, leg, side, qty):
     resolve(ex, d, p)
 
 
-def do_open(coin, notional):
+def plan(ex, coin, notional):
     notional = number(notional)
     if notional <= 0:
         raise ValueError('名义金额必须为正')
-    d = load()
-    if coin in d and d[coin]['phase'] != 'closed':
-        raise RuntimeError('已有记录，请 recover / close')
-    ex = exchange()
     spot, perp = f'{coin}/USDT', f'{coin}/USDT:USDT'
     for sym in (spot, perp):
         if sym not in ex.markets or ex.markets[sym].get('active') is False:
@@ -181,9 +184,24 @@ def do_open(coin, notional):
         minimum = ex.markets[sym].get('limits', {}).get('cost', {}).get('min') or 0
         if qty * px * (size if sym == perp else 1) < minimum:
             raise RuntimeError(f'{sym} 名义低于最小下单额')
-    p = {'live': LIVE, 'spot': spot, 'perp': perp, 'base': 0., 'contracts': 0.,
+    return {'live': LIVE, 'spot': spot, 'perp': perp, 'base': base, 'contracts': contracts,
          'size': size, 'baseline': 0., 'phase': 'opening', 'orders': [],
          'notional': notional, 'entry_px': px, 'opened_at': time.time()}
+
+
+def do_open(coin, notional):
+    from check_a import check
+    d = load()
+    if coin in d and d[coin]['phase'] != 'closed':
+        raise RuntimeError('已有记录，请 recover / close')
+    ex = exchange()
+    p = plan(ex, coin, notional)
+    readiness = check(ex, p, opening=True, private=LIVE)
+    if readiness['action'] != 'PASS':
+        raise RuntimeError(f'开仓检查未通过：{readiness}')
+    base, contracts, size, px = p['base'], p['contracts'], p['size'], p['entry_px']
+    p['base'], p['contracts'] = 0., 0.
+    p['entry_check'] = readiness
     if LIVE:
         p['baseline'], existing = account(ex, p)
         if existing:
@@ -195,11 +213,12 @@ def do_open(coin, notional):
     order(ex, d, p, 'base', 'buy', base)
     if not p['base']:
         p['phase'] = 'closed'
+        p['closed_at'] = time.time()
         save(d)
         return
     if LIVE:
         reconcile(ex, p)
-    contracts = amount(ex, perp, p['base'] / size)
+    contracts = amount(ex, p['perp'], p['base'] / size)
     order(ex, d, p, 'contracts', 'sell', contracts)
     if LIVE:
         reconcile(ex, p)
@@ -212,11 +231,20 @@ def do_open(coin, notional):
 def do_close(coin):
     d = load()
     p = d[coin]
+    if p['phase'] == 'closed' and not p.get('pending') and not p['base'] and not p['contracts']:
+        print(coin, '已经平仓，保留原平仓时间')
+        return
     if p.get('pending'):
         raise RuntimeError('先运行 recover 确认原订单')
     ex = exchange()
     if LIVE:
         reconcile(ex, p)
+        from check_a import execution
+        # 在拆掉任一腿前，确认两腿当前均可在价格上限内退出。
+        for leg, side in [('base', 'sell'), ('contracts', 'buy')]:
+            if p[leg] > 1e-10:
+                sym = p['spot'] if leg == 'base' else p['perp']
+                execution(ex, sym, side, amount(ex, sym, p[leg]))
     p['phase'] = 'closing'
     save(d)
     if p['contracts'] > 1e-10:
