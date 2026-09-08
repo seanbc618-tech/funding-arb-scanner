@@ -19,9 +19,9 @@ def state_path():
     return ROOT / ('positions_a_live.json' if LIVE else 'positions_a_dry.json')
 
 
-def load():
+def load(reject_legacy=False):
     legacy = ROOT / 'positions_a.json'
-    if legacy.exists() and json.loads(legacy.read_text()):
+    if reject_legacy and legacy.exists() and json.loads(legacy.read_text()):
         raise RuntimeError('旧 positions_a.json 有记录，须人工核对后迁移；不会自动转换')
     path = state_path()
     d = json.loads(path.read_text()) if path.exists() else {}
@@ -152,7 +152,7 @@ def order(ex, d, p, leg, side, qty):
     p['pending'] = o
     save(d)
     params = {'clOrdId': o['client_id']}
-    params.update({'tdMode': 'cash'}
+    params.update({'tdMode': 'cash', 'tgtCcy': 'base_ccy', 'banAmend': True}
                   if leg == 'base' else
                   {'tdMode': 'cross', 'posSide': 'net', 'reduceOnly': side == 'buy'})
     try:
@@ -191,7 +191,7 @@ def plan(ex, coin, notional):
 
 def do_open(coin, notional):
     from check_a import check
-    d = load()
+    d = load(reject_legacy=LIVE)
     if coin in d and d[coin]['phase'] != 'closed':
         raise RuntimeError('已有记录，请 recover / close')
     ex = exchange()
@@ -229,7 +229,7 @@ def do_open(coin, notional):
 
 
 def do_close(coin):
-    d = load()
+    d = load(reject_legacy=LIVE)
     p = d[coin]
     if p['phase'] == 'closed' and not p.get('pending') and not p['base'] and not p['contracts']:
         print(coin, '已经平仓，保留原平仓时间')
@@ -266,7 +266,7 @@ def do_close(coin):
 
 
 def do_recover(coin):
-    d = load()
+    d = load(reject_legacy=LIVE)
     p = d[coin]
     if LIVE:
         ex = exchange()
