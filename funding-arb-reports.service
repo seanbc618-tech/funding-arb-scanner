@@ -1,0 +1,16 @@
+[Unit]
+Description=Funding Arb scheduled reports and independent freshness watchdog
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/funding-arb
+EnvironmentFile=%h/.config/funding-arb/monitor.env
+EnvironmentFile=%h/.config/funding-arb/notify.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/funding-arb/.venv/bin/python -B %h/funding-arb/report_watch.py --root %h/funding-arb --db %h/funding-arb/accounting_a.sqlite --summary-hours 1
+TimeoutStartSec=150
+UMask=0077
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal

@@ -1,0 +1,19 @@
+[Unit]
+Description=Funding Arb monitor event notifications
+After=funding-arb-monitor.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/funding-arb
+EnvironmentFile=%h/.config/funding-arb/notify.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/funding-arb/.venv/bin/python -B %h/funding-arb/notify_events.py --interval 10 --cooldown 300
+Restart=always
+RestartSec=15
+UMask=0077
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

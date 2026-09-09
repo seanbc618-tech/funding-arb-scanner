@@ -18,3 +18,22 @@ __pycache__/
 *.pyc
 .venv/
 .DS_Store
+notify_events_state.json
+notify_events_state.tmp
+notify_events_state.lock
+
+# F06 heartbeat and durable delivery state
+notify_events_health.json
+notify_events_health.tmp
+report_watch_state.json
+report_watch_state.tmp
+report_watch_state.lock
+
+# F08 isolated paper ledger
+paper_a_state.json
+paper_a_state.tmp
+paper_a_state.lock
+
+paper_loop.lock
+paper_loop_status.json
+paper_loop_status.tmp

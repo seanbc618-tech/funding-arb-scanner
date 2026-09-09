@@ -15,22 +15,22 @@ def run(execute=False, account=False):
     with trade_a.state_path().with_suffix('.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         d = trade_a.load()
-        if not d:
-            return {'status': 'NO_LOCAL_POSITIONS'}
-        ex = trade_a.exchange()
-        for coin, p in d.items():
-            r = check(ex, p, private=account)
-            r['executed'] = False
-            if execute and r['action'] == 'EXIT':
-                try:
-                    # close 内部重新对账，每笔 IOC 重新查盘口；失败保留余量。
-                    trade_a.do_close(coin)
-                    r['executed'] = True
-                except Exception as exc:
-                    r['action'] = 'NEEDS_ATTENTION'
-                    r['gaps'].append(f'{type(exc).__name__}:{exc}')
-                r['position_after'] = trade_a.load()[coin]['phase']
-            results[coin] = r
+    if not d:
+        return {'status': 'NO_LOCAL_POSITIONS'}
+    ex = trade_a.exchange()
+    for coin, p in d.items():
+        r = check(ex, p, private=account)
+        r['executed'] = False
+        if execute and r['action'] == 'EXIT':
+            try:
+                # close 内部重新对账，每笔 IOC 重新查盘口；失败保留余量。
+                trade_a.do_close(coin, expected_trade_id=p.get('trade_id') or '')
+                r['executed'] = True
+            except Exception as exc:
+                r['action'] = 'NEEDS_ATTENTION'
+                r['gaps'].append(f'{type(exc).__name__}:{exc}')
+            r['position_after'] = trade_a.load()[coin]['phase']
+        results[coin] = r
     return results
 
 

@@ -35,6 +35,7 @@ def read_local(account_mode):
         rows.append({'coin': coin, 'phase': position.get('phase'),
                      'spot': position.get('spot'), 'perp': position.get('perp'),
                      'base': position.get('base'), 'contracts': position.get('contracts'),
+                     'baseline': position.get('baseline'),
                      'pending': bool(position.get('pending'))})
     return data, rows
 
@@ -51,11 +52,16 @@ def account_snapshot(ex):
             continue
         raw_contracts = position.get('contracts')
         if raw_contracts in (None, ''):
+            gaps.append('POSITION_CONTRACTS_UNKNOWN:' + str(position.get('symbol')))
+            positions.append({'symbol': position.get('symbol'), 'side': position.get('side'),
+                              'contracts': None})
             continue
         try:
             contracts = finite(raw_contracts)
         except (TypeError, ValueError):
             gaps.append('POSITION_CONTRACTS_INVALID')
+            positions.append({'symbol': position.get('symbol'), 'side': position.get('side'),
+                              'contracts': None})
             continue
         if abs(contracts) <= 1e-12:
             continue
@@ -81,6 +87,7 @@ def account_snapshot(ex):
             balance_view[key] = finite(usdt[key])
     total = balance.get('total')
     nonzero = {}
+    totals = {}
     if isinstance(total, dict):
         for coin, value in total.items():
             try:
@@ -88,6 +95,7 @@ def account_snapshot(ex):
             except (TypeError, ValueError):
                 gaps.append(f'BALANCE_INVALID:{coin}')
                 continue
+            totals[coin] = amount
             if abs(amount) > 1e-12:
                 nonzero[coin] = amount
     else:
@@ -104,30 +112,105 @@ def account_snapshot(ex):
         else:
             balance_view['margin_ratio'] = finite(margin_ratio)
     return {'positions': positions, 'balance': balance_view,
-            'nonzero_balances': nonzero, 'gaps': gaps}
+            'nonzero_balances': nonzero, 'balance_totals': totals, 'gaps': gaps}
 
 
-def compare(local_rows, account_rows):
+def compare(local_rows, account_rows, balance_totals=None):
+    """仅比较确认余量；余额缺键不是零，历史关闭记录不认领新仓。"""
     gaps = []
-    local_by_perp = {row.get('perp'): row for row in local_rows if row.get('perp')}
-    account_by_symbol = {row.get('symbol'): row for row in account_rows if row.get('symbol')}
-    for symbol, row in local_by_perp.items():
-        actual = account_by_symbol.get(symbol)
-        if not actual:
-            gaps.append(f'LOCAL_POSITION_NOT_FOUND:{row["coin"]}')
-            continue
+    active = []
+    for row in local_rows:
+        coin = row.get('coin')
+        if row.get('pending'):
+            gaps.append(f'LOCAL_PENDING_UNKNOWN:{coin}')
         try:
-            expected = finite(row['contracts'])
-            observed = finite(actual['contracts'])
+            base, contracts = finite(row.get('base')), finite(row.get('contracts'))
+            if base < 0 or contracts < 0:
+                raise ValueError('negative remainder')
         except (TypeError, ValueError):
-            gaps.append(f'POSITION_COMPARE_INVALID:{row["coin"]}')
+            gaps.append(f'LOCAL_QUANTITY_UNKNOWN:{coin}')
+            active.append(row)
             continue
-        if abs(expected - observed) > max(1e-8, abs(expected) * 1e-8):
-            gaps.append(f'POSITION_CONTRACTS_MISMATCH:{row["coin"]}')
+        if row.get('phase') == 'closed':
+            if base == 0 and contracts == 0 and not row.get('pending'):
+                continue
+            gaps.append(f'LOCAL_CLOSED_WITH_REMAINDER:{coin}')
+        active.append(row)
+
+    local_by_perp = {}
+    account_by_symbol = {}
+    for row in active:
+        symbol = row.get('perp')
+        if not symbol:
+            gaps.append(f'LOCAL_SYMBOL_UNKNOWN:{row.get("coin")}')
+        local_by_perp.setdefault(symbol, []).append(row)
+    for row in account_rows:
+        symbol = row.get('symbol')
+        account_by_symbol.setdefault(symbol, []).append(row)
+    for symbol, rows in local_by_perp.items():
+        if len(rows) != 1:
+            gaps.append(f'LOCAL_POSITION_AMBIGUOUS:{symbol}')
+            continue
+        row = rows[0]
+        coin = row.get('coin')
+        actuals = account_by_symbol.get(symbol, [])
+        if len(actuals) > 1:
+            gaps.append(f'ACCOUNT_POSITION_AMBIGUOUS:{symbol}')
+        for actual in actuals:
+            try:
+                observed = finite(actual.get('contracts'))
+                if observed != 0 and actual.get('side') != 'short':
+                    gaps.append(f'POSITION_SIDE_MISMATCH:{coin}')
+                if observed < 0:
+                    raise ValueError('negative contracts')
+            except (TypeError, ValueError):
+                gaps.append(f'POSITION_COMPARE_INVALID:{coin}')
+        try:
+            expected = finite(row.get('contracts'))
+            observed = sum(finite(a.get('contracts')) for a in actuals)
+        except (TypeError, ValueError):
+            gaps.append(f'POSITION_COMPARE_INVALID:{coin}')
+            continue
+        if expected > 0 and not actuals:
+            gaps.append(f'LOCAL_POSITION_NOT_FOUND:{coin}')
+        elif abs(expected - observed) > max(1e-8, abs(expected) * 1e-8):
+            gaps.append(f'POSITION_CONTRACTS_MISMATCH:{coin}')
     for symbol in account_by_symbol:
         if symbol not in local_by_perp:
             gaps.append(f'ACCOUNT_POSITION_UNOWNED:{symbol}')
-    return gaps
+
+    spot_owners = {}
+    for row in active:
+        spot = row.get('spot')
+        if not isinstance(spot, str) or '/' not in spot:
+            gaps.append(f'SPOT_SYMBOL_UNKNOWN:{row.get("coin")}')
+            continue
+        spot_owners.setdefault(spot.split('/')[0], []).append(row)
+    for coin, rows in spot_owners.items():
+        if len(rows) != 1:
+            gaps.append(f'SPOT_OWNERSHIP_AMBIGUOUS:{coin}')
+            continue
+        try:
+            baseline = finite(rows[0].get('baseline'))
+            base = finite(rows[0].get('base'))
+            if baseline < 0 or base < 0:
+                raise ValueError('negative spot')
+            expected = baseline + base
+        except (TypeError, ValueError):
+            gaps.append(f'SPOT_OWNERSHIP_UNKNOWN:{coin}')
+            continue
+        try:
+            actual = finite((balance_totals or {}).get(coin))
+        except (TypeError, ValueError):
+            gaps.append(f'SPOT_BALANCE_UNKNOWN:{coin}')
+            continue
+        if abs(actual - expected) > max(1e-10, abs(expected) * 1e-8):
+            gaps.append(f'SPOT_BALANCE_MISMATCH:{coin}')
+    # 现金与未参与策略的其他资产不自动认领为策略现货。
+    for coin, amount in (balance_totals or {}).items():
+        if coin != 'USDT' and coin not in spot_owners and amount != 0:
+            gaps.append(f'ACCOUNT_BALANCE_UNOWNED:{coin}')
+    return list(dict.fromkeys(gaps))
 
 
 def finish(report, exchange_instance, started):
@@ -167,10 +250,13 @@ def snapshot(account_mode, exchange_instance=None):
         report.update({'account_positions': account['positions'],
                        'balance': account['balance'],
                        'nonzero_balances': account['nonzero_balances']})
-        report['gaps'] = account['gaps'] + compare(local_rows, account['positions'])
+        report['gaps'] = account['gaps'] + compare(local_rows, account['positions'], account['balance_totals'])
         if report['gaps']:
             report['status'] = 'DATA_GAP'
-        elif not local_data and not account['positions']:
+        elif not account['positions'] and all(
+                row.get('phase') == 'closed' and row.get('base') == 0
+                and row.get('contracts') == 0 and not row.get('pending')
+                for row in local_rows):
             report['status'] = 'NO_POSITIONS'
         else:
             report['status'] = 'OK'

@@ -1,0 +1,11 @@
+[Unit]
+Description=Funding Arb independent report/watchdog tick every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+AccuracySec=1s
+Persistent=true
+Unit=funding-arb-reports.service
+
+[Install]
+WantedBy=timers.target

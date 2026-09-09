@@ -62,6 +62,7 @@ python3 manage_a.py --live                     # 显式允许本次退出决策�
 ```
 
 `check_a.py` 的 `--account` 和 `accounting.py` 仅查询私有接口，不提交交易。
+账户检查要求现货余额是明确的有限非负数，持仓及挂单接口返回列表；缺键、null 或非法响应均阻止动作，不能推断为空仓或无挂单。
 实盘状态仍来自独立的 `positions_a_live.json`；旧状态迁移门禁继续有效。
 
 已选保守默认规则（常量在 `check_a.py` 顶部）：
@@ -82,6 +83,17 @@ python3 manage_a.py --live                     # 显式允许本次退出决策�
 
 `manage_a.py` 返回 HOLD / EXIT / BLOCK / CLOSED。opening、closing、needs_close 且资料可核对时
 建议退出。只有 `--live` 且 EXIT 才调用平仓；pending、账户不匹配、盘口不足或资料不全一律 BLOCK。
+F02 将结果拆为三个可同时查看的部分：`risk.status/reasons/gaps` 表示已知风险和风险资料缺口，
+`execution.status/limitations` 表示当前动作限制，`data_status` 表示本次检查资料是否齐全。
+例如盘口超时但保证金越线时，返回 `risk.status=EXIT_REQUIRED`、`execution.status=BLOCKED`、
+`action=BLOCK`，风险原因仍保留。`CLEAR` 仅表示当前范围内未触发已有风险规则；
+`risk.scope=local_and_public` 不包含账户验证。`READY` 不是交易授权，管理器仍只按顶层 `action` 决定。
+风险证据有缺口但已经发现越线时保留 `EXIT_REQUIRED`，没有已知越线时为 `UNKNOWN`；
+开仓检查的风险越线显示 `ENTRY_BLOCKED`，顶层为 `BLOCK`。
+`checked_at/completed_at/evidence_at` 是本机检查/接口返回时间，不代表交易所原始更新时间。
+超过 10 秒的整次检查、结束时已过 5 秒的盘口都会阻止动作，已经采集到的风险不会被清空。
+`CLOSED` 仅适用于无 pending 且双腿确认为零的本地历史记录，不能证明真实账户无仓。
+
 退出失败返回 NEEDS_ATTENTION，保留订单和余量，下次须先 recover/核对再处理。
 这是单次运行入口；不会常驻或自行安装 cron。行情、账户检查不是原子快照，IOC 可能部分成交。
 
@@ -137,7 +149,7 @@ python3 notify_run.py scan.py                  # 扫描结束报告
 指定插件脚本、私有配置和 Python。也可沿用插件的 `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID`。
 通知不确认时退出码为 2（业务本身失败则保留业务退出码），先检查群消息，禁止盲目重跑交易。
 包装器不会追加 `--live`、自动恢复或启动定时任务；直接运行原脚本不会发送通知。
-Telegram 通知目前仍是本机按次调用；常驻持仓监控由独立的只读 systemd 服务负责，远端 OKX 凭据需另存为私有环境文件。
+人工按次通知继续使用 notify_run.py；F03 新增独立 notify_events.py 读取只读监控快照发送事件，远端 OKX 凭据与通知配置分别保存在私有文件中。
 当前远端服务已启用；在私有环境文件尚未配置前，状态会保持 `CONFIG_MISSING`，不会伪报账户为空。
 
 ### 常驻只读持仓监控
@@ -160,8 +172,7 @@ journalctl --user -u funding-arb-monitor.service -f
 cat ~/funding-arb/monitor_a_status.json
 ```
 
-本服务没有 `--live` 参数，不会自动交易。当前 Telegram Notifier 是本机插件；未把 Token
-复制到仓库或远端。若要远端持续推送 Telegram，需另行把私有通知配置放在远端，再接入通知命令。
+本服务没有 `--live` 参数，不会自动交易。F03 已将插件发送脚本和私有通知配置单独部署到远端；Token 不进入仓库、日志和发布包。
 
 | 参数 | 默认 | 含义 |
 |------|------|------|
@@ -235,3 +246,159 @@ Blofin 当前因公开接口连接问题排除。
 ## License
 
 MIT
+
+### F03 常驻事件通知
+
+`funding-arb-notify.service` 每 10 秒独立读取 `monitor_a_status.json`，不直接访问账户或调用交易入口。
+状态、异常类别、本地阶段/确认余量/pending、快照中已有保证金与清算越线类别发生变化时通知。
+相同事件跨重启去重；变化频繁时全局最少 300 秒发送一次，期间合并为最新快照，不保证逐条发送瞬态事件。
+单纯时间戳和未越线的行情变化不触发消息。风险阈值沿用 check_a.py；仅能报告监控快照已包含的证据。
+
+发送前将意图原子落盘为 ATTEMPTING，成功为 CONFIRMED，无法确认则 DELIVERY_UNKNOWN。
+中断留下 ATTEMPTING 或未知回执时，同一事件不重发；此策略可能漏送而避免盲目重复。
+状态文件损坏时暂停通知，不自动清空。通知异常只写白名单状态到独立服务日志，不重跑监控或业务。
+通知状态 `notify_events_state.json` 权限 600、已忽略；不要删除它来重试未知投递。
+
+消息只包含固定状态、枚举原因、受限资产代码及数字；不透传原始异常、账户标识或配置。
+本地 open/closed 阶段只是观察，不作为成交证明。快照超过 180 秒或来自未来时不发送旧事实；
+定时报表、外部失联告警属于 F06，F03 尚不提供。通知器失联不能依靠自己告警。
+
+远端配置 `~/.config/funding-arb/notify.env` 指定 TELEGRAM_NOTIFY_SCRIPT、TELEGRAM_NOTIFY_PYTHON、
+TELEGRAM_NOTIFY_CONFIG；通知凭据在单独 600 权限文件，不能粘贴进仓库或服务单元。
+可用 `systemctl --user status funding-arb-notify.service` 检查状态，
+用 `journalctl --user -u funding-arb-notify.service -n 20` 查看白名单回执。
+当前实测、版本哈希及部署边界见 artifacts/F03/REPORT.md。
+
+### F04 资金费与成交增量采集
+
+`accounting.py` 保留按本地交易轮次核算入口，新增账户级原始证据入口：
+
+```bash
+# 凭据需已加载到当前进程环境；日期为 UTC。此命令仅示例，不会自动执行。
+umask 077
+python3 accounting.py --account-sync --since 2026-09-08
+# 持续采集；Ctrl+C 停止，不安装任何后台服务。
+python3 accounting.py --account-sync --since 2026-09-08 --interval 300
+```
+
+账户采集不要求已有策略持仓；`EVIDENCE_COLLECTED` 只证明指定接口窗口已查询，收益为 null。
+SQLite 新增 collection_windows 记录各账户/数据流的时间覆盖与分页游标；成功页与游标同时提交。
+重复 ID 不重复入库。evidence_conflicts 保存更正观察，原 evidence 不覆盖；存在冲突时阻止净收益结论，
+不自动清除冲突或选取“最新值”。重叠复查最近七天，七天前迟发/更正需明确扩大复查窗口才能发现。
+
+89 天之外若已有完整的本地查询覆盖，可继续使用真实证据；旧 evidence 行本身不证明窗口完整，
+没有覆盖证明或采集中断跨越源窗口时保留 INVALID_DECLARED_GAP/null，不补造、不自动申请长历史。
+账户级 ALL:SPOT/ALL:SWAP 与按合约采集分别记录覆盖，当前不自动将账户级覆盖转成策略轮次覆盖。
+本版本未安装采集服务，常驻调度整合仍在 F12；目前的远端验证副本和独立原始数据库见 F04 报告。
+
+### F05 只读持仓收益与资金报表
+
+`python3 portfolio_a.py --db accounting_a.sqlite --markdown` 输出账户与策略分开的报表（省略 --markdown 输出 JSON）。
+当前进程需有 OKX 三项凭据；systemd 环境不会自动注入普通 SSH 终端。该入口不包含 --live、不下单、不写账目库。
+收益需要 F04 同账户、同合约与时段覆盖证据，以及本地确认订单；没有本策略记录不自动认领外部仓位。
+
+分别展示已入账资金费、原币手续费、移动加权成本下已实现/未实现损益、盘口估计退出成本与退出后净损益。
+现货币量手续费已经影响净数量及成本，不重复扣费；其他无换算依据的费用保留缺口。
+当前估值使用新鲜盘口中间价，退出使用双腿 VWAP 和账户 taker 费率；不是成交或结算承诺。
+已关闭且证据满足原会计校验时才显示查询时点已平仓净损益。
+
+现货成本/市值用 USDT，OKX 账户净资产/初始保证金用 USD，分开显示。账户净资产含外部资产；
+无策略资本分配记录时 strategy_nav_usdt、capital_return 为 null，不能以账户总净值冒充策略回报。
+实例、验证和远端独立报表位置见 artifacts/F05/REPORT.md。报价、费率、覆盖或归属不足时字段保持 null。
+
+
+### F06 定时报告与独立 watchdog
+
+`report_watch.py` 由独立 systemd oneshot/timer 每分钟触发，检查监控快照、通知心跳与服务状态。阈值 180 秒；异常变化/恢复冷却 300 秒。进程存在但快照不更新也会告警。同机检查不能覆盖整台 VPS 或网络失联。
+
+默认每小时摘要、北京时间 08:00 日报，日报包含当时摘要。支持 `--summary-hours 4` 或 `0`（仅日报和异常）；停机重启只报告当前时段，不补发大量历史消息。持久发送意图防重，未知回执不重试，不能随意删除 report_watch_state.json。
+
+日报要求 F04 同账户完整自然日覆盖；缺口保持 null。账户资金费与费用不代表策略日收益，当前日级策略收益尚无完整证据。报表只读查询，未启动采集任务；默认本地数据库 accounting_a.sqlite，线上显式读取既有 F04 独立证据库。采集调度尚待 F12。
+
+线上使用专用发布目录中的模块，原运行目录交易模块不变。`funding-arb-reports.timer` 应 enabled/active；oneshot 的 service 在完成后 inactive/dead 属正常，检查 Result=success。详细交付与回退见 artifacts/F06/REPORT.md。
+
+
+### F01–F06 综合复核状态
+
+2026-09-09 复核修复 5 处本地问题，198 项检查通过；修补尚未部署。详细差异与限制见 artifacts/F01-F06-review/REPORT.md。历史回归已恢复到 checks/funding_arb_regression.py 和 checks/funding_modules_regression.py，不再依赖临时目录。
+
+
+### F07 持久执行状态与启动门槛
+
+新周期保存交易 ID、两腿目标与确认余量、订单身份/确认状态、费用与敞口。`trade_a.py startup` 检查空跑状态；`--live startup` 查询真实账户并维护执行锁/路径绑定，不下单。挂单、未知订单、其他币种未完成动作、账户模式/归属或对账不符时暂停新增动作。
+
+开/平/recover 的函数入口统一取得状态锁与账户锁。账户锁位于 `~/.local/state/funding-arb/execution-locks/`，同机同用户的不同 checkout 共用且绑定唯一状态路径；不可删除文件绕过绑定，也不提供跨主机保证。订单接受后中断只能查询原客户订单号，不能重发；已知但未终结的成交观察与终结确认余量分开。
+
+旧无版本状态仍可只读查看，修改须先人工审阅迁移；本次不迁移、不部署、不启用实盘。默认空跑还不是 F08 的真实行情 paper 模型。验收与边界见 artifacts/F07/REPORT.md，F07 待审阅。
+
+
+### 最新部署状态（2026-09-09）
+
+F01–F07 与综合复核/F07 复核修补均已部署，发布目录 f01-f07-20260909-586bd8ed1c65。监控、事件通知、定时报表已恢复；F07 执行器仅安装，未启动交易。此前“未部署”段落为历史交付状态。验收、哈希和回退边界见 artifacts/deploy-F01-F07-20260909/REPORT.md。
+
+
+## F08 真实盘口模拟成交（本地交付）
+
+独立命令只读取公共行情，不需要 OKX 凭据。首次初始化显式填写模拟本金及费用率；以下费率只是示例假设，不代表你的真实账户等级。
+
+```bash
+python3 -B paper_a.py init --cash 10000 --spot-fee 0.001 --perp-fee 0.0005
+python3 -B paper_a.py open BTC --notional 200
+python3 -B paper_a.py status
+python3 -B paper_a.py close BTC
+```
+
+`--notional` 是单腿目标 USDT 金额，两腿合计需要额外资金占用及费用。盘口不足会部分成交，余量取消；`needs_close` 保留已成交仓位，需要继续执行 close 处理剩余数量。`pending` 表示落盘过程未完成，禁止自动重试或删除账本；应先核查意图和状态。重复 init 不覆盖已有账本。
+
+状态在项目目录 `paper_a_state.json`，与实盘状态隔离。永续采用 1 倍初始名义资金占用，费用均按 USDT 模拟；没有资金费结算、动态保证金/强平、连续调度或实盘成交保证。详见 [F08 验收报告](artifacts/F08/REPORT.md)。
+
+F08 复核已修复限价取整的深度遗漏及平仓资金检查，详见 [复核报告](artifacts/F08-review/REPORT.md)。现货出售所得可支付模拟费用，平空同时核算释放保证金与价差亏损；资金不足时保留持仓并拒绝该次模拟成交。
+
+
+## F09 单周期模拟资金费（本地复核及公共接口验证通过）
+
+```bash
+python3 -B paper_a.py settle BTC --at-ms <实际结算时间的毫秒时间戳>
+python3 -B paper_a.py status
+```
+
+用历史资金费接口的 fundingTime 替换占位符，至少等待该分钟结束。按当时已确认空仓、实际结算费率和该分钟标记价格开盘价计算纸面资金费；分钟开盘价是模拟约定，不代表精确真实账单。重复调用不会重复支付。
+
+结果保存在 paper_a_state.json 的 funding 字段；POSTED 为模拟记账，NO_POSITION 为当时无仓位，INVALID_DECLARED_GAP/payment_usdt=null 为缺数据。缺口不改变现金。旧 F08 订单缺执行时间不会自动补写或猜测，单个周期成功不代表全历史完整覆盖。F09 没有启动定时器或改真实账簿。详见 [F09 报告](artifacts/F09/REPORT.md)。
+
+F09 公共接口补验已通过：真实已结算费率和标记价格驱动合成持仓记账、重启去重；全套 268 项检查通过。本轮未部署、未真实交易，详见 [F09 复核报告](artifacts/F09-review/REPORT.md)。
+
+
+## F10 按金额的 OKX 净收益排名（本地交付）
+
+```bash
+python3 -B rank_a.py BTC ETH --notional 1000 --hold-hours 720 --margin-ratio 1 --reserve-usdt 100 --basis-stress-bps 50
+```
+
+复用既有 OKX 环境凭据，只读取账户费率和行情，输出 JSON。保证金比例和备用金是明确的场景参数，不代表账户实际可用资金。按预计净收益/总资金占用排名，缺数据、深度不足或净收益非正时排除；可全部返回 HOLD_CASH。CANDIDATE 只供审阅，不授权执行。
+
+当前预测与历史已结算费率分列，四笔盘口/费用成本、预计收入、净收益、回本天数和基差压力都有明细。预测假设与数据限制见 [F10 报告](artifacts/F10/REPORT.md)。旧 scan.py 仍是原研究扫描入口，未替换为自动交易逻辑。
+
+
+## F11 paper 组合预算（本地交付）
+
+```bash
+python3 -B allocate_a.py reserve ranking.json --per-coin-gross-usdt 2500 --total-gross-usdt 5000 --max-positions 2 --buffer-usdt 100
+python3 -B allocate_a.py execute <reservation_id>
+python3 -B allocate_a.py release <reservation_id>
+```
+
+额度按两腿名义之和，例值需自行确定；读取 F10 原始 JSON，paper 费率须一致且保证金比例为 1。预留扣除其他候选可用资金，部分成交保留实际占用、释放剩余。未知订单阻止继续执行。报价与预留仅有效 5 秒，过期需 release 并重新报价；F12 尚未提供自动串联。首次配置后直接 paper open 禁止绕过限额，close 保留。详见 [F11 报告](artifacts/F11/REPORT.md)。
+
+
+## F12 paper 主循环（本地交付）
+
+```bash
+python3 -B paper_loop.py BTC ETH --cycles 10 --interval 1 --notional 1000 --hold-hours 720 --per-coin-gross-usdt 2500 --total-gross-usdt 5000 --max-positions 2 --buffer-usdt 100 --basis-stress-bps 50
+```
+
+先初始化 F08 paper 账本、配置账户只读费率凭据，保持 F11 限额与费率一致。扫描独立进程，主循环先检查已有持仓，后消费排名及资金费资料，再按预算模拟执行。默认一轮，--cycles 0 为持续模拟；首次 WAIT_SCAN 正常。Ctrl-C 停止，不平仓。状态输出在 paper_loop_status.json。
+
+额度为示例；没有 live 路径或自动退出，缺口和未完成执行阻止新仓。报价过期不执行，网络请求仍可能延迟。详见 [F12 报告](artifacts/F12/REPORT.md)。
+
+F10—F12 联合复核已修复执行数量与排名脱节、结算边界、过期持仓检查和整批预留归属问题，322 项检查通过；补丁尚未部署。详见 [联合复核报告](artifacts/F10-F12-review/REPORT.md)。

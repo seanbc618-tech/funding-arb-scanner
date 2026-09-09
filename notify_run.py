@@ -32,6 +32,20 @@ def notifier_command():
     return cmd + ['send']
 
 
+def send_message(message, command=None):
+    """一次投递；只返回白名单回执，失败不暴露子进程日志、不重试。"""
+    command = notifier_command() if command is None else command
+    try:
+        sent = subprocess.run(command, input=message, text=True, capture_output=True, timeout=35)
+        receipt = json.loads(sent.stdout) if sent.returncode == 0 else {}
+        ident = receipt.get('message_id')
+        if receipt.get('ok') is True and type(ident) is int and ident > 0:
+            return {'status': 'CONFIRMED', 'message_id': ident}
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        pass
+    return {'status': 'DELIVERY_UNKNOWN'}
+
+
 def summary(script, args, code, elapsed, output):
     mode = '显式实盘参数' if '--live' in args else (
         '真实账户只读' if '--account' in args or script == 'accounting.py' else '公共行情/空跑')
@@ -73,15 +87,11 @@ def main():
     print(result.stdout, end='')
     print(result.stderr, end='', file=sys.stderr)
     message = summary(opts.script, opts.args, result.returncode, time.monotonic()-start, result.stdout)
-    try:
-        sent = subprocess.run(command, input=message, text=True, capture_output=True, timeout=35)
-        receipt = json.loads(sent.stdout) if sent.returncode == 0 else {}
-        if receipt.get('ok') is not True or not receipt.get('message_id'):
-            raise RuntimeError('unconfirmed')
-        print(f'Telegram 已发送：message_id={receipt["message_id"]}')
-    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
+    receipt = send_message(message, command)
+    if receipt['status'] != 'CONFIRMED':
         print('Telegram 投递未确认；先查看群消息，不自动重试。业务状态保持原样。', file=sys.stderr)
         return result.returncode or 2
+    print(f'Telegram 已发送：message_id={receipt["message_id"]}')
     return result.returncode
 
 
