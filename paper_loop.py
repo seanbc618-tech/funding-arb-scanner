@@ -99,12 +99,12 @@ def drain(inbox):
         except queue.Empty:return latest
 
 
-def reconcile(state):
+def reconcile(state,allow_exit_continuation=False):
     if state.get('mode')!='paper' or state.get('version')!=1:raise ValueError('INVALID_PAPER_STATE')
     if state.get('pending'):raise ValueError('PENDING_EXECUTION')
     if any(a['status']=='EXECUTING' for a in state.get('allocations',{}).values()):raise ValueError('ALLOCATION_EXECUTING')
     active=[t for t in state['trades'].values() if t['phase']!='closed']
-    if any(t['phase']!='open' for t in active):raise ValueError('UNFINISHED_TRADE')
+    if any(t['phase']!='open' and not (allow_exit_continuation and t.get('exit_request') and t['phase'] in ('closing','needs_close')) for t in active):raise ValueError('UNFINISHED_TRADE')
     if len({t['coin'] for t in active})!=len(active):raise ValueError('DUPLICATE_ACTIVE_COIN')
     totals={}
     for t in state['trades'].values():
@@ -150,13 +150,20 @@ class CachedFunding:
     def publicGetMarketHistoryMarkPriceCandles(self,params):return self.cycle['price']
 
 
-def tick(path,ex,inbox,limits):
+def tick(path,ex,inbox,limits,auto_exit=False,max_hold_hours=None):
     """调用者必须持有账本锁。扫描读取为非阻塞，检查始终先于扫描结果消费。"""
     state=json.loads(Path(path).read_text());report={'started_at_ms':int(time.time()*1000),'steps':[],'decision':'BLOCK'}
     reports=check_positions(ex,state);report['positions']=reports;report['steps'].append('POSITIONS_CHECKED')
-    try:reconcile(state)
+    try:reconcile(state,allow_exit_continuation=auto_exit)
     except Exception as exc:report['reconciliation_gap']=str(exc);return report
     report['steps'].append('RECONCILED')
+    if auto_exit:
+        import exit_a
+        report['exits']=exit_a.run(state,path,ex,reports,max_hold_hours)
+        report['steps'].append('EXIT_CHECKED')
+        if any(d['action']!='HOLD' for d in report['exits']):
+            report['decision']='EXIT_PROCESSED' if all(d['action']=='HOLD' or d.get('result')=='CLOSED' for d in report['exits']) else 'EXIT_REVIEW'
+            return report
     snapshot=drain(inbox)
     if snapshot is None:report['decision']='WAIT_SCAN';return report
     report['scan_started_at_ms']=snapshot['started_at_ms'];report['scan_completed_at_ms']=snapshot['completed_at_ms'];report['scan_gap']=snapshot.get('gap')
@@ -207,8 +214,11 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('coins',nargs='+');parser.add_argument('--cycles',type=int,default=1,help='0 = continuous')
     parser.add_argument('--interval',type=float,default=1)
+    parser.add_argument('--auto-exit',action='store_true',help='enable F13 paper exits')
+    parser.add_argument('--max-hold-hours',type=float,help='optional explicit holding limit, independent of forecast horizon')
     for arg in ('notional','hold-hours','per-coin-gross-usdt','total-gross-usdt','max-positions','buffer-usdt','basis-stress-bps'):parser.add_argument('--'+arg,required=True)
     args=parser.parse_args()
+    if args.max_hold_hours is not None and (not args.auto_exit or not 0<args.max_hold_hours<float('inf')):parser.error('positive holding limit requires auto-exit')
     if args.cycles<0 or not 1<=args.interval<=60:parser.error('invalid cycles/interval')
     scenario=dict(notional=args.notional,hold_hours=args.hold_hours,margin_ratio=1,reserve_usdt=args.buffer_usdt,basis_stress_bps=args.basis_stress_bps)
     limits={k:getattr(args,k) for k in ('per_coin_gross_usdt','total_gross_usdt','max_positions','buffer_usdt')}
@@ -226,7 +236,7 @@ def main():
                     if ex is None:ex=exchange()
                     with path.with_suffix('.lock').open('a') as lock:
                         os.fchmod(lock.fileno(),0o600);fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-                        report=tick(path,ex,inbox,limits)
+                        report=tick(path,ex,inbox,limits,args.auto_exit,args.max_hold_hours)
                 except Exception as exc:report={'decision':'BLOCK','gap':type(exc).__name__}
                 if report.get('positions') is not None:last_position_check=int(time.time()*1000)
                 if report.get('scan_completed_at_ms') and not report.get('scan_gap'):last_scan_success=report['scan_completed_at_ms']

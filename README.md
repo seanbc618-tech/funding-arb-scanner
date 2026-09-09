@@ -402,3 +402,7 @@ python3 -B paper_loop.py BTC ETH --cycles 10 --interval 1 --notional 1000 --hold
 额度为示例；没有 live 路径或自动退出，缺口和未完成执行阻止新仓。报价过期不执行，网络请求仍可能延迟。详见 [F12 报告](artifacts/F12/REPORT.md)。
 
 F10—F12 联合复核已修复执行数量与排名脱节、结算边界、过期持仓检查和整批预留归属问题，322 项检查通过；补丁尚未部署。详见 [联合复核报告](artifacts/F10-F12-review/REPORT.md)。
+
+## F13 自动退出（本地待审阅）
+
+在现有 paper_loop.py 命令后添加 `--auto-exit` 才启用；可选 `--max-hold-hours 720` 为明确最长持有时限，默认不设。优先处理敞口风险、已确认退出余量、负资金费率及显式期限；缺数据或未知订单暂停。退出使用原有保守盘口限制。当前线上服务尚未启用，详见 [F13 报告](artifacts/F13/REPORT.md)。
