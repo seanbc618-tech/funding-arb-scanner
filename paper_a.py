@@ -236,6 +236,8 @@ def operate(state, path, ex, coin, notional=None, closing=False, allocation_id=N
         b=dec(persisted['positions'].get(spot,{}).get('quantity','0'))
         perp_pos=persisted['positions'].get(perp,{})
         persisted['trades'][ident]['exposure_base']=str(b-dec(perp_pos.get('quantity','0'))*dec(perp_pos.get('contract_size','0')))
+        if not persisted.get('pending') and not persisted['trades'][ident]['orders'] and b==0 and dec(perp_pos.get('quantity','0'))==0:
+            persisted['trades'][ident].update(phase='closed',closed_at=time.time(),outcome='REJECTED_BEFORE_FILL')
         save(path,persisted);state.clear();state.update(persisted)
         raise
     return state['trades'][ident]

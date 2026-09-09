@@ -55,6 +55,8 @@ class Allocation(unittest.TestCase):
   with patch.object(self.ex,'fetch_order_book',side_effect=book):
    with self.assertRaises(ValueError):a.execute(self.s,self.path,self.ex,out[0]['reservation_id'])
   self.assertFalse(self.s['positions'])
+  self.assertTrue(all(t['phase']=='closed' and t['outcome']=='REJECTED_BEFORE_FILL' for t in self.s['trades'].values()))
+  self.assertEqual(a.execute(self.s,self.path,self.ex,out[1]['reservation_id'])['phase'],'open')
  def test_expired_preserves_reservation(self):
   out=self.reserve()
   with patch('time.time',return_value=N/1000+10):
