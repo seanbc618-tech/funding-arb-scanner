@@ -1,5 +1,12 @@
 # 交接文档 · 资金费率套利
 
+## 2026-09-11 F14–F16 已提交部署（当前断点）
+
+- 用户授权提交、部署、重启。代码提交 da780e8，远端 releases/f16-da780e8，377 项远端检查通过，6 个模块部署并重启 paper 服务。
+- 服务 active/running，NRestarts=0，扫描与新状态推进；BTC open，pending/EXECUTING 均无。切换期间账本及服务单元未变，备份在发布 backup/，不得回滚运行账本。
+- 保留既有参数及 auto_exit；auto_recover=false、switch_policy=null，F16 观察未启动。新功能已部署，自动启用参数与连续验收仍待完成。
+- 未推送 Git，未真实交易。证据 artifacts/deploy-F16-da780e8/REPORT.md、verification.json、installed.json。
+
 ## 2026-09-11 F14–F16 复核完成（当前断点）
 
 - 复现修复 4 项：换仓用预计而非实际回笼预算、F16 未完成执行误报通过、NO_POSITION 未核验实际持仓、冻结指纹漏会计等依赖。
