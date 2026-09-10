@@ -58,7 +58,7 @@ def forecast(ex,symbol,now,hold_hours):
             'next_funding_ms':next_at,'interval_ms':interval,'forecast_cycles':cycles}
 
 
-def evaluate(ex,coin,notional,hold_hours,margin_ratio,reserve_usdt,basis_stress_bps):
+def evaluate(ex,coin,notional,hold_hours,margin_ratio,reserve_usdt,basis_stress_bps,held_base=None):
     out={'coin':coin,'status':'INVALID_DECLARED_GAP','reason':None,'expected_net_usdt':None,
          'capital_return':None,'rank':None,'mode':'READ_ONLY_ESTIMATE_NOT_EXECUTION_APPROVAL'}
     try:
@@ -78,10 +78,13 @@ def evaluate(ex,coin,notional,hold_hours,margin_ratio,reserve_usdt,basis_stress_
         books={s:ex.fetch_order_book(s,limit=50) for s in (spot,perp)}
         view=copy.copy(ex);view.fetch_order_book=lambda symbol,limit=50:books[symbol]
         ask=dec(books[spot]['asks'][0][0])
-        contracts=quantity(ex,perp,notional/ask/size)
+        contracts=quantity(ex,perp,(dec(held_base) if held_base is not None else notional/ask)/size)
         base=quantity(ex,spot,contracts*size)
+        if held_base is None and base!=contracts*size:
+            contracts=quantity(ex,perp,base/size)
+            base=quantity(ex,spot,contracts*size)
         # 净值计算要求严格基础币中性，不能将未对冲方向风险计入套利收益。
-        if base!=contracts*size:raise ValueError('QUANTITY_HEDGE_MISMATCH')
+        if base!=contracts*size or (held_base is not None and base!=dec(held_base)):raise ValueError('QUANTITY_HEDGE_MISMATCH')
         quotes=[quote(view,spot,'buy',base),quote(view,perp,'sell',contracts),
                 quote(view,spot,'sell',base),quote(view,perp,'buy',contracts)]
         if any(q['status']!='FILLED' for q in quotes):

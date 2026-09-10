@@ -75,7 +75,26 @@ def identity(state):
     return hashlib.sha256(json.dumps({'trades':state['trades'],'positions':state['positions']},sort_keys=True).encode()).hexdigest()
 
 
-def worker(out,stop,path,coins,scenario,interval):
+def scan(ex,state,coins,scenario,auto_rotate=False):
+    ranking=rank_a.rank(ex,coins,**scenario)
+    holdings={};switch_rankings={}
+    if auto_rotate:
+        import rotate_a
+        for ident,t in state['trades'].items():
+            if t['phase']!='open':continue
+            base=state['positions'].get(f"{t['coin']}/USDT",{}).get('quantity','0')
+            holdings[ident]=rank_a.evaluate(ex,t['coin'],**scenario,held_base=base)
+            try:
+                budget=rotate_a.released_capital(state,t,holdings[ident])
+                switch_rankings[ident]=rotate_a.fit_ranking(ex,ranking,scenario,budget)
+            except (ValueError,KeyError,TypeError,ArithmeticError):switch_rankings[ident]={'rows':[]}
+        current=next((r for r in state.get('rotations',[]) if r['phase'] not in ('DONE','CASH')),None)
+        if current:
+            ranking=rotate_a.fit_ranking(ex,ranking,scenario,min(dec(current['economics']['released_capital_usdt']),dec(current.get('actual_released_capital_usdt',current['economics']['released_capital_usdt']))))
+    return ranking,holdings,switch_rankings
+
+
+def worker(out,stop,path,coins,scenario,interval,auto_rotate=False):
     # 此进程只读取账本及行情/账户费率，绝不修改交易状态。
     while not stop.is_set():
         result={'started_at_ms':int(time.time()*1000),'ranking':None,'funding':[],'gap':None}
@@ -83,7 +102,7 @@ def worker(out,stop,path,coins,scenario,interval):
             public=exchange();state=json.loads(Path(path).read_text())
             result['state_identity']=identity(state)
             result['funding']=collect_funding(public,state)
-            try:result['ranking']=rank_a.rank(exchange(True),coins,**scenario)
+            try:result['ranking'],result['holdings'],result['switch_rankings']=scan(exchange(True),state,coins,scenario,auto_rotate)
             except Exception as exc:result['gap']=str(exc) if isinstance(exc,ValueError) else type(exc).__name__
         except Exception as exc:result['gap']=type(exc).__name__
         result['completed_at_ms']=int(time.time()*1000)
@@ -150,9 +169,13 @@ class CachedFunding:
     def publicGetMarketHistoryMarkPriceCandles(self,params):return self.cycle['price']
 
 
-def tick(path,ex,inbox,limits,auto_exit=False,max_hold_hours=None):
+def tick(path,ex,inbox,limits,auto_exit=False,max_hold_hours=None,auto_recover=False,switch_policy=None):
     """调用者必须持有账本锁。扫描读取为非阻塞，检查始终先于扫描结果消费。"""
     state=json.loads(Path(path).read_text());report={'started_at_ms':int(time.time()*1000),'steps':[],'decision':'BLOCK'}
+    if auto_recover:
+        import recovery_a
+        report['recovery']=recovery_a.run(state,path);report['steps'].append('RECOVERY_CHECKED')
+        if report['recovery']['status']=='BLOCK':return report
     reports=check_positions(ex,state);report['positions']=reports;report['steps'].append('POSITIONS_CHECKED')
     try:reconcile(state,allow_exit_continuation=auto_exit)
     except Exception as exc:report['reconciliation_gap']=str(exc);return report
@@ -185,6 +208,12 @@ def tick(path,ex,inbox,limits,auto_exit=False,max_hold_hours=None):
         report['decision']='SCAN_UNAVAILABLE';return report
     if not 0<=time.time()*1000-snapshot['completed_at_ms']<=5000:
         report['decision']='STALE_SCAN';return report
+    if switch_policy is not None:
+        import rotate_a
+        report['rotation']=rotate_a.run(state,path,ex,snapshot['ranking'],snapshot.get('holdings',{}),limits,switch_policy,snapshot['started_at_ms'],snapshot.get('switch_rankings',{}))
+        report['steps'].append('ROTATION_CHECKED')
+        if report['rotation']['action']=='WAIT':
+            report['decision']='ROTATION_PROCESSED';return report
     # 仅释放本循环明确创建且尚未执行的预留；不处理用户手工预留。
     for ident,a in list(state.get('allocations',{}).items()):
         if a.get('owner')=='paper_loop' and a['status']=='RESERVED':allocate_a.release(state,path,ident)
@@ -215,33 +244,55 @@ def main():
     parser.add_argument('coins',nargs='+');parser.add_argument('--cycles',type=int,default=1,help='0 = continuous')
     parser.add_argument('--interval',type=float,default=1)
     parser.add_argument('--auto-exit',action='store_true',help='enable F13 paper exits')
+    parser.add_argument('--print-config',action='store_true',help='print normalized runtime parameters and exit')
+    parser.add_argument('--evidence-dir',help='F16 directory created by paper_acceptance begin')
+    parser.add_argument('--auto-recover',action='store_true',help='F15: audit paper ledger and reduce known remainders')
+    parser.add_argument('--auto-rotate',action='store_true',help='F14: requires explicit switch settings, auto-exit and auto-recover')
+    for name in ('min-hold-hours','cooldown-hours','buffer-usdt','confirm-seconds','confirmations','max-daily'):
+        parser.add_argument('--switch-'+name)
     parser.add_argument('--max-hold-hours',type=float,help='optional explicit holding limit, independent of forecast horizon')
     for arg in ('notional','hold-hours','per-coin-gross-usdt','total-gross-usdt','max-positions','buffer-usdt','basis-stress-bps'):parser.add_argument('--'+arg,required=True)
     args=parser.parse_args()
     if args.max_hold_hours is not None and (not args.auto_exit or not 0<args.max_hold_hours<float('inf')):parser.error('positive holding limit requires auto-exit')
     if args.cycles<0 or not 1<=args.interval<=60:parser.error('invalid cycles/interval')
+    if args.auto_recover and not args.auto_exit:parser.error('auto-recover requires auto-exit')
+    settings={k:getattr(args,'switch_'+k) for k in ('min_hold_hours','cooldown_hours','buffer_usdt','confirm_seconds','confirmations','max_daily')}
+    if args.auto_rotate:
+        if not args.auto_exit or not args.auto_recover or any(v is None for v in settings.values()):parser.error('auto-rotate requires auto-exit, auto-recover and all six switch settings')
+        import rotate_a
+        settings=rotate_a.policy(settings)
+    elif any(v is not None for v in settings.values()):parser.error('switch settings require auto-rotate')
+    else:settings=None
     scenario=dict(notional=args.notional,hold_hours=args.hold_hours,margin_ratio=1,reserve_usdt=args.buffer_usdt,basis_stress_bps=args.basis_stress_bps)
     limits={k:getattr(args,k) for k in ('per_coin_gross_usdt','total_gross_usdt','max_positions','buffer_usdt')}
+    config={'coins':sorted(set(c.upper() for c in args.coins)),'scenario':scenario,'limits':limits,'auto_exit':args.auto_exit,'max_hold_hours':args.max_hold_hours,'auto_recover':args.auto_recover,'switch_policy':settings,'interval':args.interval}
+    if args.print_config:print(json.dumps(config,ensure_ascii=False,indent=2));return
     path=paper.ROOT/'paper_a_state.json'
     # 独立进程锁阻止两套循环；账本锁仅覆盖每次主循环，不被扫描占用。
     with (paper.ROOT/'paper_loop.lock').open('a') as loop_lock:
         os.fchmod(loop_lock.fileno(),0o600);fcntl.flock(loop_lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         ctx=mp.get_context('spawn');inbox=ctx.Queue(maxsize=1);stop=ctx.Event()
-        process=ctx.Process(target=worker,args=(inbox,stop,str(path),[c.upper() for c in args.coins],scenario,args.interval),daemon=True);process.start()
+        process=ctx.Process(target=worker,args=(inbox,stop,str(path),[c.upper() for c in args.coins],scenario,args.interval,args.auto_rotate),daemon=True);process.start()
         ex=None;number=0;last_scan_success=None;last_position_check=None
         try:
             while args.cycles==0 or number<args.cycles:
-                started=time.time();number+=1
+                started=time.time();number+=1;observed_state=None
                 try:
                     if ex is None:ex=exchange()
                     with path.with_suffix('.lock').open('a') as lock:
                         os.fchmod(lock.fileno(),0o600);fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-                        report=tick(path,ex,inbox,limits,args.auto_exit,args.max_hold_hours)
+                        report=tick(path,ex,inbox,limits,args.auto_exit,args.max_hold_hours,args.auto_recover,settings)
+                        observed_state=json.loads(path.read_text())
                 except Exception as exc:report={'decision':'BLOCK','gap':type(exc).__name__}
                 if report.get('positions') is not None:last_position_check=int(time.time()*1000)
                 if report.get('scan_completed_at_ms') and not report.get('scan_gap'):last_scan_success=report['scan_completed_at_ms']
                 report.update(cycle=number,completed_at_ms=int(time.time()*1000),scanner_alive=process.is_alive(),
                               last_scan_success_ms=last_scan_success,last_position_check_ms=last_position_check)
+                report['runtime_config']=config
+                if args.evidence_dir:
+                    import paper_acceptance
+                    if observed_state is None:raise ValueError('OBSERVATION_STATE_UNCONFIRMED')
+                    paper_acceptance.record(args.evidence_dir,observed_state,report)
                 save(paper.ROOT/'paper_loop_status.json',report);print(json.dumps(report,ensure_ascii=False),flush=True)
                 if args.cycles and number>=args.cycles:break
                 time.sleep(max(0,args.interval-(time.time()-started)))

@@ -1,5 +1,19 @@
 # 交接文档 · 资金费率套利
 
+## 2026-09-11 F14–F16 复核完成（当前断点）
+
+- 复现修复 4 项：换仓用预计而非实际回笼预算、F16 未完成执行误报通过、NO_POSITION 未核验实际持仓、冻结指纹漏会计等依赖。
+- 377 项检查通过，21 个原有文件不变。证据 artifacts/F14-F16-review/REPORT.md、before.log、dependency-before.log、after.log 与 verification.json。
+- 改动仍仅本地，未提交/部署/重启/联网或真实交易。F16 真实历史回测及连续观察仍未完成；下一步先审阅，再确定上线参数与观察期。
+
+## 2026-09-11 F14–F16 本地实施（当前断点）
+
+- 用户授权连续做 F14 到 F16。F14 换仓、F15 paper 恢复已本地完成；F16 冻结数据回放/连续观察工具完成，真实历史回测与连续观察尚未完成，不能标全量验收通过。
+- 新增 rotate_a.py、recovery_a.py、paper_replay.py、paper_acceptance.py；接入 paper_loop.py 可选开关，并修复 rank_a.py 缩量后的双腿精度对齐。未配置自动生效的新交易参数。
+- 373 个检查通过（338 既有 + 35 新增），包含 15 个实际持久化边界中断子用例；21 个原有状态/研究文件不变。合成闭环完成 1 次换仓，净损益 −0.79850060 USDT，绝非历史盈利证据。
+- 未提交、推送、部署、重启、联网或真实交易；此前远端 F13 部署记录未在本轮刷新。线上换仓/恢复开关未启用。
+- 下次从 artifacts/F14-F16/REPORT.md 及 verification.json、synthetic-cycle/result.json 接续。F16 需要真实冻结数据、观察时长/间隔和明确换仓参数；未开始 F17。
+
 ## 2026-09-09 F13 已部署启用（最新状态）
 
 - 提交 90c64d5，发布 releases/f13-90c64d5，远端 338 项检查通过。仅更新 paper_loop.py/exit_a.py，paper 服务新增 --auto-exit 并重启。
