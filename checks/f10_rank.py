@@ -12,7 +12,7 @@ class Exchange(Books):
         self.rate='.001';self.fee_spot='.001';self.fee_perp='.0005'
         self.history=[{'instId':'BTC-USDT-SWAP','fundingTime':str(1788912000000-i*IV),'realizedRate':'.001'} for i in range(23)]
     def fetch_trading_fee(self,s):return {'symbol':s,'taker':self.fee_perp if ':' in s else self.fee_spot}
-    def fetch_funding_rate(self,s):return {'info':{'instId':'BTC-USDT-SWAP','method':'current_period','fundingTime':str(1788912000000+IV),'nextFundingTime':str(1788912000000+2*IV),'fundingRate':self.rate}}
+    def fetch_funding_rate(self,s):return {'fundingRate':self.rate,'fundingTimestamp':1788912000000+IV,'info':{'instId':'BTC-USDT-SWAP','method':'current_period','fundingTime':str(1788912000000+IV),'nextFundingTime':str(1788912000000+2*IV),'fundingRate':self.rate}}
     def publicGetPublicFundingRateHistory(self,params):return {'code':'0','data':self.history}
 
 class Rank(unittest.TestCase):

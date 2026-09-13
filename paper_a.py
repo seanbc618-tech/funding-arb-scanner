@@ -208,6 +208,24 @@ def operate(state, path, ex, coin, notional=None, closing=False, allocation_id=N
             base=quantity(ex,spot,contracts*size)
         if abs(base-contracts*size)>max(base,contracts*size)*dec('.02'):raise ValueError('PLAN_EXPOSURE')
         qspot=quote(ex,spot,'buy',base);qperp=quote(ex,perp,'sell',contracts)
+        if allocation_id is not None:
+            # 第一腿前复核当前费率与完整往返成本；第二腿仍优先完成对冲。
+            ranked=allocation['ranking']
+            funding=ex.fetch_funding_rate(perp)
+            at=dec(funding['fundingTimestamp']);now=dec(time.time()*1000)
+            rate=dec(funding['fundingRate'])
+            if rate<=0 or at!=dec(ranked['next_funding_ms']) or not now<at<=now+dec(ranked['interval_ms']):
+                raise ValueError('ENTRY_FUNDING_CHANGED_OR_NONPOSITIVE')
+            exit_spot=quote(ex,spot,'sell',base);exit_perp=quote(ex,perp,'buy',contracts)
+            quotes=(qspot,qperp,exit_spot,exit_perp)
+            if any(q['status']!='FILLED' for q in quotes):raise ValueError('ENTRY_DEPTH_CHANGED')
+            if any(not 0<=time.time()*1000-q['book_timestamp']<=MAX_BOOK_AGE_MS for q in quotes):raise ValueError('ENTRY_RECHECK_EXPIRED')
+            if time.time()*1000>=at:raise ValueError('FUNDING_BOUNDARY_CROSSED')
+            costs=[dec(q['notional_usdt']) for q in quotes]
+            fees=sum((dec(q['notional_usdt'])*dec(state['fees'][q['kind']]) for q in quotes),dec(0))
+            cost=costs[0]-costs[2]+costs[3]-costs[1]+fees
+            income=base*(dec(qperp['best'])+dec(exit_perp['best']))/2*min(rate,dec(ranked['forecast_rate_per_cycle']))*dec(ranked['forecast_cycles'])
+            if income-cost<=0:raise ValueError('ENTRY_NET_CHANGED_NONPOSITIVE')
         need=base*dec(qspot['limit_price'])*(1+dec(state['fees']['spot']))+contracts*size*dec(qperp['best'])*(1+dec(state['fees']['perp']))
         if available(state)<need:raise ValueError('INSUFFICIENT_PAIR_CAPITAL')
         ident=uuid.uuid4().hex

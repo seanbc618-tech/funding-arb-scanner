@@ -26,4 +26,16 @@ with tempfile.TemporaryDirectory() as tmp:
  later=now+3600
  def unknown(text):messages.append(text);return {'status':'DELIVERY_UNKNOWN'}
  n.tick(root,unknown,later);count=len(messages);n.tick(root,unknown,later);assert len(messages)==count
- print(json.dumps({'status':'PASS','cases':['equity_with_open_spot_and_perp','exit_fee_deduction','stale_quote_null','wrong_size_null','baseline_no_history_spam','no_duplicate','close_net_matches_cash','both_leg_events_and_close','unknown_delivery_no_retry']}))
+ # 实际发送推进时钟后必须重新读取，不能继续用 tick 开始时间的报价。
+ p.operate(s,path,ex,'BTC',100)
+ now=time.time();r['completed_at_ms']=now*1000
+ for value in r['positions'].values():
+  for q in value['metrics'].values():q['book_timestamp']=now*1000
+ (root/'paper_loop_status.json').write_text(json.dumps(r))
+ with patch('time.time',return_value=now) as clock:
+  def delayed(text):
+   messages.append(text);clock.return_value+=10
+   return {'status':'CONFIRMED','message_id':len(messages)}
+  n.tick(root,delayed)
+ assert '模拟净值：未知' in messages[-1],messages[-1]
+ print(json.dumps({'status':'PASS','cases':['equity_with_open_spot_and_perp','exit_fee_deduction','stale_quote_null','wrong_size_null','baseline_no_history_spam','no_duplicate','close_net_matches_cash','both_leg_events_and_close','unknown_delivery_no_retry','refresh_after_slow_delivery']}))

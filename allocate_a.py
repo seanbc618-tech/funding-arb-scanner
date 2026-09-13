@@ -17,7 +17,7 @@ def reserved(state):
                 if x['status']=='RESERVED'),dec(0))
 
 
-def reserve_batch(state,path,ranking,limits,owner=None):
+def reserve_batch(state,path,ranking,limits,owner=None,entry_policy=None):
     from paper_a import available
     if state.get('mode')!='paper' or state.get('version')!=1:raise ValueError('INVALID_PAPER_STATE')
     per,total,buffer=map(dec,(limits['per_coin_gross_usdt'],limits['total_gross_usdt'],limits['buffer_usdt']))
@@ -43,6 +43,13 @@ def reserve_batch(state,path,ranking,limits,owner=None):
         raise ValueError('EXISTING_USAGE_EXCEEDS_LIMITS')
     decisions=[]
     rows=sorted(ranking['rows'],key=lambda r:(r.get('rank') or 10**9,r['coin']))
+    if entry_policy is not None:
+        from rotate_a import policy
+        entry_policy=policy(entry_policy)
+        confirmations=new.setdefault('entry_confirmations',{})
+        eligible={r['coin'] for r in rows if r.get('status')=='CANDIDATE'}
+        for coin in list(confirmations):
+            if coin not in eligible:confirmations.pop(coin)
     for row in rows:
         coin=row['coin'];decision={'coin':coin,'status':'SKIPPED','reason':None}
         try:
@@ -67,6 +74,25 @@ def reserve_batch(state,path,ranking,limits,owner=None):
             if gross>per:raise ValueError('PER_COIN_GROSS_LIMIT')
             if sum(usage.values())+gross>total:raise ValueError('TOTAL_GROSS_LIMIT')
             if available(new)-buffer<capital:raise ValueError('INSUFFICIENT_UNRESERVED_CAPITAL')
+            if entry_policy is not None and (any(t['coin']==coin and t['phase']=='closed' for t in new['trades'].values()) or any(a['coin']==coin and a['status']=='FAILED' for a in allocations.values())):
+                closed=[t for t in new['trades'].values() if t['coin']==coin and t['phase']=='closed']
+                blocked=False
+                for t in closed:
+                    filled=any(dec(o['quote']['filled'])>0 for o in t['orders'])
+                    delay=dec(entry_policy['cooldown_hours'])*3600 if filled else dec(entry_policy['confirm_seconds'])
+                    if dec(now)/1000-dec(t['closed_at'])<delay:blocked=True
+                for a in allocations.values():
+                    if a['coin']==coin and a['status']=='FAILED' and now-a.get('finished_at_ms',a['created_at_ms'])<float(entry_policy['confirm_seconds'])*1000:blocked=True
+                if blocked:
+                    confirmations.pop(coin,None);raise ValueError('ENTRY_COOLDOWN')
+                item=confirmations.get(coin)
+                cycle=str(row['next_funding_ms'])
+                if not item or item['cycle']!=cycle:
+                    item={'cycle':cycle,'count':1,'at_ms':now,'scan_ms':row['computed_at_ms']};confirmations[coin]=item
+                elif row['computed_at_ms']>item['scan_ms'] and now-item['at_ms']>=float(entry_policy['confirm_seconds'])*1000:
+                    item.update(count=item['count']+1,at_ms=now,scan_ms=row['computed_at_ms'])
+                if item['count']<entry_policy['confirmations']:raise ValueError('ENTRY_CONFIRMING')
+                confirmations.pop(coin,None)
             ident=uuid.uuid4().hex
             allocations[ident]={'id':ident,'coin':coin,'status':'RESERVED','capital_usdt':str(capital),
                 'gross_usdt':str(gross),'leg_caps':leg_caps,'notional':str(dec(quotes[0]['requested'])*dec(quotes[0]['best'])),
@@ -74,6 +100,7 @@ def reserve_batch(state,path,ranking,limits,owner=None):
             usage[coin]=gross;decision.update(status='RESERVED',reservation_id=ident)
         except (ValueError,KeyError,TypeError,ArithmeticError) as exc:
             decision['reason']=str(exc) if isinstance(exc,ValueError) else type(exc).__name__
+            if entry_policy is not None and decision['reason']!='ENTRY_CONFIRMING':confirmations.pop(coin,None)
         decisions.append(decision)
     save(path,new);state.clear();state.update(new)
     return decisions
@@ -98,7 +125,7 @@ def execute(state,path,ex,ident):
     try:
         result=operate(state,path,ex,a['coin'],a['notional'],allocation_id=ident)
     except Exception:
-        persisted=json.loads(path.read_text());persisted['allocations'][ident]['status']='FAILED'
+        persisted=json.loads(path.read_text());persisted['allocations'][ident]['status']='FAILED';persisted['allocations'][ident]['finished_at_ms']=int(time.time()*1000)
         save(path,persisted);state.clear();state.update(persisted);raise
     persisted=json.loads(path.read_text());persisted['allocations'][ident]['status']='FINISHED'
     persisted['allocations'][ident]['trade_id']=result['trade_id']

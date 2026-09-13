@@ -113,7 +113,8 @@ def events(state):
 
 
 def tick(root, sender=send_message, now=None):
-    now=time.time() if now is None else now
+    live_clock=now is None
+    now=time.time() if live_clock else now
     # 账本与报告均由原子替换发布；只读单个完整快照，不争抢交易循环锁。
     # 估值另外校验报价时间、方向及数量，错配时净值留空。
     state=json.loads((root/'paper_a_state.json').read_text())
@@ -131,6 +132,10 @@ def tick(root, sender=send_message, now=None):
         receipt=sender(text);saved['events'][key].update(receipt);save(path,saved);deliveries.append(receipt)
     fresh=sorted(((key,*event) for key,event in all_events.items() if key not in saved['events']),key=lambda v:(v[1],v[0]))
     for key,_,text in fresh:deliver(key,text)
+    if live_clock:
+        state=json.loads((root/'paper_a_state.json').read_text())
+        report=json.loads((root/'paper_loop_status.json').read_text())
+        now=time.time()
     hour=datetime.fromtimestamp(now,TZ).strftime('%Y-%m-%d/%H')
     if fresh or saved['hour']!=hour:
         key='summary:'+str(time.time_ns())

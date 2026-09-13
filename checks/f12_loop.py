@@ -53,6 +53,19 @@ class Loop(unittest.TestCase):
    self.assertEqual(r['funding'][0]['results'][0]['status'],'POSTED')
    self.assertEqual(r['decision'],'SCAN_UNAVAILABLE')
   finally:case.doCleanups()
+ def test_exit_review_still_posts_ready_funding(self):
+  import f09_funding as fixture
+  case=fixture.Funding();case.setUp()
+  try:
+   case.s['trades']['x'].update(phase='open',coin='BTC',trade_id='x');p.save(case.path,case.s)
+   self.c.path=case.path;x=self.snapshot();x['state_identity']='old'
+   x['funding']=[{'symbol':fixture.S,'gap':None,'cycles':[{'at':fixture.T,'rate':case.ex.rate,'price':case.ex.price}]}]
+   self.q.put(x)
+   with patch.object(loop,'check_positions',return_value={}),patch('exit_a.run',return_value=[{'action':'BLOCK','reason':'INCOMPLETE_DATA'}]):
+    r=loop.tick(self.c.path,self.c.ex,self.q,self.c.limits,auto_exit=True)
+   self.assertEqual(r['decision'],'EXIT_REVIEW')
+   self.assertEqual(r['funding'][0]['results'][0]['status'],'POSTED')
+  finally:case.doCleanups()
  def test_collect_truncated_history_declared(self):
   self.c.s['trades']['x']={'orders':[{'executed_at_ms':1,'quote':{'kind':'perp','filled':'1','symbol':'BTC/USDT:USDT'}}]}
   with patch.object(self.c.ex,'publicGetPublicFundingRateHistory',return_value={'code':'0','data':[]}):

@@ -38,7 +38,13 @@ class Allocation(unittest.TestCase):
   for coin in ['BTC','ETH']:p.operate(self.s,self.path,self.ex,coin,closing=True)
   self.assertTrue(all(t['phase']=='closed' for t in self.s['trades'].values()))
  def test_partial_fill_release_and_keep_exposure(self):
-  out=self.reserve();self.ex.depth=.2;a.execute(self.s,self.path,self.ex,out[0]['reservation_id'])
+  out=self.reserve()
+  original=self.ex.fetch_order_book;calls=[0]
+  def fetch(*args,**kwargs):
+   calls[0]+=1
+   if calls[0]>4:self.ex.depth=.2
+   return original(*args,**kwargs)
+  with patch.object(self.ex,'fetch_order_book',side_effect=fetch):a.execute(self.s,self.path,self.ex,out[0]['reservation_id'])
   self.assertEqual(self.s['allocations'][out[0]['reservation_id']]['status'],'FINISHED')
   self.assertEqual(next(iter(self.s['trades'].values()))['phase'],'needs_close')
   with self.assertRaisesRegex(ValueError,'UNFINISHED'):a.execute(self.s,self.path,self.ex,out[1]['reservation_id'])
@@ -62,10 +68,67 @@ class Allocation(unittest.TestCase):
   with patch('time.time',return_value=N/1000+10):
    with self.assertRaisesRegex(ValueError,'EXPIRED'):a.execute(self.s,self.path,self.ex,out[0]['reservation_id'])
   self.assertEqual(self.s['allocations'][out[0]['reservation_id']]['status'],'RESERVED')
+ def test_recheck_negative_rate_before_any_fill(self):
+  out=self.reserve();self.ex.rate='-.001'
+  with self.assertRaisesRegex(ValueError,'ENTRY_FUNDING'):a.execute(self.s,self.path,self.ex,out[0]['reservation_id'])
+  self.assertFalse(self.s['trades']);self.assertFalse(self.s['positions'])
+ def test_recheck_costs_before_any_fill(self):
+  out=self.reserve();self.ex.rate='.000001'
+  with self.assertRaisesRegex(ValueError,'ENTRY_NET'):a.execute(self.s,self.path,self.ex,out[0]['reservation_id'])
+  self.assertFalse(self.s['trades'])
+ def test_reentry_cooldown_and_new_confirmations_survive_reload(self):
+  settings=dict(min_hold_hours=24,cooldown_hours=24,buffer_usdt=10,confirm_seconds=60,confirmations=3,max_daily=1)
+  self.ranking['rows']=self.ranking['rows'][:1]
+  self.s['trades']['old']={'coin':'BTC','phase':'closed','closed_at':a.time.time(),
+                         'orders':[{'quote':{'filled':'1'}}]}
+  def attempt():
+   now=int(a.time.time()*1000);row=self.ranking['rows'][0];row['computed_at_ms']=now;row['next_funding_ms']=now+3600000
+   for q in row['quotes']:q['book_timestamp']=now
+   p.save(self.path,self.s)
+   return a.reserve_batch(self.s,self.path,self.ranking,self.limits,entry_policy=settings)[0]
+  self.assertEqual(attempt()['reason'],'ENTRY_COOLDOWN')
+  a.time.time.return_value+=86400
+  # 同一结算周期内的不同新扫描才累计确认。
+  future=int(a.time.time()*1000)+3600000
+  def confirm():
+   now=int(a.time.time()*1000);row=self.ranking['rows'][0];row['computed_at_ms']=now;row['next_funding_ms']=future
+   for q in row['quotes']:q['book_timestamp']=now
+   self.s=json.loads(self.path.read_text())
+   return a.reserve_batch(self.s,self.path,self.ranking,self.limits,entry_policy=settings)[0]
+  self.assertEqual(confirm()['reason'],'ENTRY_CONFIRMING')
+  self.assertEqual(confirm()['reason'],'ENTRY_CONFIRMING')
+  a.time.time.return_value+=60;self.assertEqual(confirm()['reason'],'ENTRY_CONFIRMING')
+  a.time.time.return_value+=60;self.assertEqual(confirm()['status'],'RESERVED')
+ def test_bad_scan_resets_reentry_confirmation(self):
+  settings=dict(min_hold_hours=24,cooldown_hours=24,buffer_usdt=10,confirm_seconds=60,confirmations=3,max_daily=1)
+  self.s['trades']['old']={'coin':'BTC','phase':'closed','closed_at':a.time.time()-86401,'orders':[{'quote':{'filled':'1'}}]}
+  def run():return a.reserve_batch(self.s,self.path,self.ranking,self.limits,entry_policy=settings)[0]
+  self.assertEqual(run()['reason'],'ENTRY_CONFIRMING')
+  self.ranking['rows'][0]['quotes'][0]['book_timestamp']-=6000
+  self.assertEqual(run()['reason'],'STALE_OR_PARTIAL_QUOTES')
+  self.assertNotIn('BTC',self.s['entry_confirmations'])
+ def test_zero_fill_closed_trade_uses_retry_interval_not_day(self):
+  settings=dict(min_hold_hours=24,cooldown_hours=24,buffer_usdt=10,confirm_seconds=60,confirmations=3,max_daily=1)
+  self.s['trades']['old']={'coin':'BTC','phase':'closed','closed_at':a.time.time()-59,'orders':[]}
+  self.assertEqual(a.reserve_batch(self.s,self.path,self.ranking,self.limits,entry_policy=settings)[0]['reason'],'ENTRY_COOLDOWN')
+  self.s['trades']['old']['closed_at']-=2
+  self.assertEqual(a.reserve_batch(self.s,self.path,self.ranking,self.limits,entry_policy=settings)[0]['reason'],'ENTRY_CONFIRMING')
+ def test_failed_attempt_is_throttled_without_trade(self):
+  settings=dict(min_hold_hours=24,cooldown_hours=24,buffer_usdt=10,confirm_seconds=60,confirmations=3,max_daily=1)
+  out=self.reserve();self.ex.rate='-.001'
+  with self.assertRaises(ValueError):a.execute(self.s,self.path,self.ex,out[0]['reservation_id'])
+  r=a.reserve_batch(self.s,self.path,self.ranking,self.limits,entry_policy=settings)
+  self.assertEqual(r[0]['reason'],'ENTRY_COOLDOWN')
  def test_fee_mismatch(self):
   self.s['fees']['spot']='.002';self.assertEqual(self.reserve()[0]['reason'],'PAPER_AND_RANKING_FEES_DIFFER')
  def test_partial_cash_matches_actual_and_remaining_reservation(self):
-  out=self.reserve();self.ex.depth=.2;a.execute(self.s,self.path,self.ex,out[0]['reservation_id'])
+  out=self.reserve()
+  original=self.ex.fetch_order_book;calls=[0]
+  def fetch(*args,**kwargs):
+   calls[0]+=1
+   if calls[0]>4:self.ex.depth=.2
+   return original(*args,**kwargs)
+  with patch.object(self.ex,'fetch_order_book',side_effect=fetch):a.execute(self.s,self.path,self.ex,out[0]['reservation_id'])
   held=sum((p.dec(x['margin_usdt']) for x in self.s['positions'].values()),p.dec(0))
   remaining=p.dec(self.s['allocations'][out[1]['reservation_id']]['capital_usdt'])
   self.assertEqual(p.available(self.s),p.dec(self.s['cash_usdt'])-held-remaining)

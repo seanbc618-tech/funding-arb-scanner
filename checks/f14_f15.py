@@ -103,8 +103,14 @@ class RotationRecovery(unittest.TestCase):
  def test_partial_open_then_actual_remainder_close(self):
   p.operate(self.c.s,self.c.path,self.c.ex,'BTC',closing=True)
   recovery.run(self.c.s,self.c.path)
-  ds=allocate_a.reserve_batch(self.c.s,self.c.path,{'rows':[self.old]},self.c.limits,owner='paper_loop');self.c.ex.depth=.2
-  t=allocate_a.execute(self.c.s,self.c.path,self.c.ex,ds[0]['reservation_id']);self.assertEqual(t['phase'],'needs_close')
+  ds=allocate_a.reserve_batch(self.c.s,self.c.path,{'rows':[self.old]},self.c.limits,owner='paper_loop')
+  original=self.c.ex.fetch_order_book;calls=[0]
+  def fetch(*args,**kwargs):
+   calls[0]+=1
+   if calls[0]>4:self.c.ex.depth=.2
+   return original(*args,**kwargs)
+  with patch.object(self.c.ex,'fetch_order_book',side_effect=fetch):t=allocate_a.execute(self.c.s,self.c.path,self.c.ex,ds[0]['reservation_id'])
+  self.assertEqual(t['phase'],'needs_close')
   recovery.run(self.c.s,self.c.path);self.c.ex.depth=100
   # Real check_a public risk path, rather than a mocked HOLD result.
   orig=self.c.ex.fetch_funding_rate

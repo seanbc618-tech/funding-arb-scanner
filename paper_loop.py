@@ -180,18 +180,16 @@ def tick(path,ex,inbox,limits,auto_exit=False,max_hold_hours=None,auto_recover=F
     try:reconcile(state,allow_exit_continuation=auto_exit)
     except Exception as exc:report['reconciliation_gap']=str(exc);return report
     report['steps'].append('RECONCILED')
+    exit_decision=None
     if auto_exit:
         import exit_a
         report['exits']=exit_a.run(state,path,ex,reports,max_hold_hours)
         report['steps'].append('EXIT_CHECKED')
         if any(d['action']!='HOLD' for d in report['exits']):
-            report['decision']='EXIT_PROCESSED' if all(d['action']=='HOLD' or d.get('result')=='CLOSED' for d in report['exits']) else 'EXIT_REVIEW'
-            return report
+            exit_decision='EXIT_PROCESSED' if all(d['action']=='HOLD' or d.get('result')=='CLOSED' for d in report['exits']) else 'EXIT_REVIEW'
     snapshot=drain(inbox)
-    if snapshot is None:report['decision']='WAIT_SCAN';return report
+    if snapshot is None:report['decision']=exit_decision or 'WAIT_SCAN';return report
     report['scan_started_at_ms']=snapshot['started_at_ms'];report['scan_completed_at_ms']=snapshot['completed_at_ms'];report['scan_gap']=snapshot.get('gap')
-    if snapshot.get('state_identity')!=identity(state):
-        report['decision']='STATE_CHANGED_RESCAN';return report
     report['funding']=[];funding_gap=False
     for batch in snapshot.get('funding',[]):
         if batch['gap']:funding_gap=True
@@ -201,6 +199,10 @@ def tick(path,ex,inbox,limits,auto_exit=False,max_hold_hours=None,auto_recover=F
             report['funding'][-1]['results'].append(entry)
             if entry['status']=='INVALID_DECLARED_GAP':funding_gap=True
     report['steps'].append('FUNDING_CHECKED')
+    if exit_decision:
+        report['decision']=exit_decision;return report
+    if snapshot.get('state_identity')!=identity(state):
+        report['decision']='STATE_CHANGED_RESCAN';return report
     # 回放发现缺口或风险/退出建议时只报告，F13 才实现自动退出。
     if funding_gap or not positions_ready(reports):
         report['decision']='POSITION_OR_FUNDING_REVIEW';return report
@@ -217,7 +219,7 @@ def tick(path,ex,inbox,limits,auto_exit=False,max_hold_hours=None,auto_recover=F
     # 仅释放本循环明确创建且尚未执行的预留；不处理用户手工预留。
     for ident,a in list(state.get('allocations',{}).items()):
         if a.get('owner')=='paper_loop' and a['status']=='RESERVED':allocate_a.release(state,path,ident)
-    decisions=allocate_a.reserve_batch(state,path,snapshot['ranking'],limits,owner='paper_loop')
+    decisions=allocate_a.reserve_batch(state,path,snapshot['ranking'],limits,owner='paper_loop',entry_policy=switch_policy)
     report['allocations']=decisions;report['executions']=[]
     for d in decisions:
         if d['status']!='RESERVED':continue
