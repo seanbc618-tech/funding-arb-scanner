@@ -67,6 +67,25 @@ class Acceptance(unittest.TestCase):
  def test_scanner_running_but_stale_rejected(self):
   self.begin();r=self.report();r['last_scan_success_ms']-=61000;a.record(self.path,self.state,r)
   self.assertEqual(a.assess(self.path)['status'],'INVALID_DECLARED_GAP')
+ def test_normal_no_trade_decisions_are_not_data_gaps(self):
+  self.begin()
+  for decision in ('HOLD_CASH','WAIT_SCAN','STATE_CHANGED_RESCAN','STALE_SCAN','ROTATION_PROCESSED'):
+   r=self.report();r['decision']=decision
+   r['allocations']=[{'status':'REJECTED','reason':'TOTAL_GROSS_LIMIT'}]
+   a.record(self.path,self.state,r)
+  result=a.assess(self.path)
+  self.assertEqual(result['status'],'OBSERVING');self.assertEqual(result['gaps'],[])
+ def test_incomplete_exit_evidence_cannot_be_erased_by_recovery(self):
+  self.begin();r=self.report();r['decision']='EXIT_REVIEW'
+  r['exits']=[{'action':'BLOCK','reason':'INCOMPLETE_DATA'}]
+  r['positions']={'example':{'gaps':['spot_book:ValueError:INSUFFICIENT_DEPTH_WITHIN_PRICE_LIMIT'],
+                          'metrics':{'spot_execution':None},'data_status':'INCOMPLETE'}}
+  a.record(self.path,self.state,r);a.time.time.return_value+=1
+  a.record(self.path,self.state,self.report())
+  result=a.assess(self.path)
+  self.assertEqual(result['status'],'INVALID_DECLARED_GAP')
+  self.assertIn('RUNTIME_REVIEW_OR_SCANNER_DOWN',result['gaps'])
+  self.assertIsNone(result['metrics']['closed_net_usdt'])
  def test_full_replay_cycle_and_actual_costs(self):
   result=replay.replay(dataset(),self.path)
   self.assertEqual(result['status'],'PASS_SYNTHETIC_REPLAY',result['gaps'])

@@ -263,7 +263,7 @@ def main():
         settings=rotate_a.policy(settings)
     elif any(v is not None for v in settings.values()):parser.error('switch settings require auto-rotate')
     else:settings=None
-    scenario=dict(notional=args.notional,hold_hours=args.hold_hours,margin_ratio=1,reserve_usdt=args.buffer_usdt,basis_stress_bps=args.basis_stress_bps)
+    scenario=dict(notional=args.notional,hold_hours=args.hold_hours,margin_ratio=1,reserve_usdt=args.buffer_usdt,basis_stress_bps=args.basis_stress_bps,max_forecast_cycles=1)
     limits={k:getattr(args,k) for k in ('per_coin_gross_usdt','total_gross_usdt','max_positions','buffer_usdt')}
     config={'coins':sorted(set(c.upper() for c in args.coins)),'scenario':scenario,'limits':limits,'auto_exit':args.auto_exit,'max_hold_hours':args.max_hold_hours,'auto_recover':args.auto_recover,'switch_policy':settings,'interval':args.interval}
     if args.print_config:print(json.dumps(config,ensure_ascii=False,indent=2));return

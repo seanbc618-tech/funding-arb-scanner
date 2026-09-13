@@ -58,7 +58,7 @@ def forecast(ex,symbol,now,hold_hours):
             'next_funding_ms':next_at,'interval_ms':interval,'forecast_cycles':cycles}
 
 
-def evaluate(ex,coin,notional,hold_hours,margin_ratio,reserve_usdt,basis_stress_bps,held_base=None):
+def evaluate(ex,coin,notional,hold_hours,margin_ratio,reserve_usdt,basis_stress_bps,held_base=None,max_forecast_cycles=None):
     out={'coin':coin,'status':'INVALID_DECLARED_GAP','reason':None,'expected_net_usdt':None,
          'capital_return':None,'rank':None,'mode':'READ_ONLY_ESTIMATE_NOT_EXECUTION_APPROVAL'}
     try:
@@ -97,6 +97,13 @@ def evaluate(ex,coin,notional,hold_hours,margin_ratio,reserve_usdt,basis_stress_
         trading_cost=sp_in-sp_out+pe_out-pe_in
         total_cost=trading_cost+fee_cost
         mark=(dec(books[perp]['asks'][0][0])+dec(books[perp]['bids'][0][0]))/2
+        scenario_cycles=prediction['forecast_cycles']
+        if max_forecast_cycles is not None:
+            cap=dec(max_forecast_cycles)
+            if cap<=0 or cap!=int(cap):raise ValueError('INVALID_FORECAST_CYCLE_CAP')
+            prediction['forecast_cycles']=min(scenario_cycles,int(cap))
+        prediction['scenario_forecast_cycles']=scenario_cycles
+        prediction['max_forecast_cycles']=max_forecast_cycles
         funding=base*mark*dec(prediction['forecast_rate_per_cycle'])*prediction['forecast_cycles']
         net=funding-total_cost
         entry_fees=sp_in*fees[spot]+pe_in*fees[perp]

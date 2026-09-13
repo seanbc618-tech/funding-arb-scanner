@@ -26,6 +26,14 @@ class Rank(unittest.TestCase):
         self.assertEqual(r.dec(x['expected_net_usdt']),r.dec('84.9565'))
         self.assertEqual(r.dec(x['capital_usdt']),r.dec('2100.4995'))
         self.assertEqual(r.dec(x['capital_return']),r.dec('84.9565')/r.dec('2100.4995'))
+    def test_runtime_cycle_cap_rejects_long_horizon_fee_recovery(self):
+        old=self.evaluate();self.assertEqual(old['status'],'CANDIDATE')
+        self.kw['max_forecast_cycles']=1;new=self.evaluate()
+        self.assertEqual(new['status'],'REJECT_NET');self.assertEqual(new['forecast_cycles'],1)
+        self.assertEqual(new['scenario_forecast_cycles'],90)
+        self.assertEqual(r.dec(new['expected_funding_usdt']),r.dec(old['expected_funding_usdt'])/90)
+        self.assertEqual(new['roundtrip_cost_usdt'],old['roundtrip_cost_usdt'])
+
     def test_short_hold_high_apr_rejected(self):
         self.kw['hold_hours']=24;x=self.evaluate();self.assertEqual(x['status'],'REJECT_NET');self.assertGreater(r.dec(x['historical_apr']),1)
     def test_hold_before_next_cycle_no_funding(self):

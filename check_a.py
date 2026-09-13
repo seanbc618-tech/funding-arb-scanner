@@ -3,6 +3,7 @@ import argparse
 import json
 import math
 import time
+from decimal import Decimal
 
 MAX_SLIPPAGE_BPS = 20
 MAX_BASIS_BPS = 100
@@ -20,13 +21,18 @@ def num(x):
     return n
 
 
-def execution(ex, symbol, side, qty, now_ms=None):
+def execution(ex, symbol, side, qty, now_ms=None, evidence=None):
     """订单簿数量与 ccxt 下单数量一致：现货币量，永续张数。"""
+    if side not in ('buy', 'sell'):
+        raise ValueError('INVALID_SIDE')
     qty = num(qty)
     if qty <= 0:
         raise ValueError('NONPOSITIVE_QUANTITY')
     book = ex.fetch_order_book(symbol, limit=50)
     now = int(time.time() * 1000) if now_ms is None else now_ms
+    if evidence is not None:
+        evidence.update(symbol=symbol, side=side, requested=qty, checked_at_ms=now,
+                        book={k:book.get(k) for k in ('timestamp','asks','bids')})
     ts = num(book['timestamp'])
     if not 0 <= now - ts <= MAX_BOOK_AGE_MS:
         raise ValueError('BOOK_STALE_OR_FUTURE')
@@ -37,11 +43,25 @@ def execution(ex, symbol, side, qty, now_ms=None):
     best = num(levels[0][0])
     if best <= 0:
         raise ValueError('INVALID_PRICE')
-    raw_limit = best * (1 + MAX_SLIPPAGE_BPS / 10000 * (1 if side == 'buy' else -1))
-    price = num(ex.price_to_precision(symbol, raw_limit))
+    raw_limit = Decimal(str(best)) * (1 + Decimal(str(MAX_SLIPPAGE_BPS)) / 10000 * (1 if side == 'buy' else -1))
+    # 先验证整份盘口，避免回退选档使用损坏或乱序的深档。
+    for rows, direction in ((asks, 1), (bids, -1)):
+        previous = None
+        for row in rows:
+            px, size = num(row[0]), num(row[1])
+            if px <= 0 or size < 0 or (previous is not None and (px - previous) * direction < 0):
+                raise ValueError('INVALID_BOOK_LEVEL')
+            previous = px
+    price = num(ex.price_to_precision(symbol, float(raw_limit)))
     # 不允许精度舍入把限价推到风险上限之外。
-    if (side == 'buy' and price > raw_limit) or (side == 'sell' and price < raw_limit):
-        price = num(ex.price_to_precision(symbol, best))
+    if (side == 'buy' and Decimal(str(price)) > raw_limit) or (side == 'sell' and Decimal(str(price)) < raw_limit):
+        eligible = [num(row[0]) for row in levels
+                    if (Decimal(str(row[0])) <= raw_limit if side == 'buy' else Decimal(str(row[0])) >= raw_limit)]
+        price = num(ex.price_to_precision(symbol, eligible[-1]))
+    if price <= 0 or (side == 'buy' and Decimal(str(price)) > raw_limit) or (side == 'sell' and Decimal(str(price)) < raw_limit):
+        raise ValueError('PRICE_PRECISION_OUTSIDE_CAP')
+    if evidence is not None:
+        evidence.update(raw_limit=str(raw_limit), limit_price=price)
     left, cost, previous = qty, 0., best
     for level in levels:
         px, size = num(level[0]), num(level[1])
@@ -55,6 +75,8 @@ def execution(ex, symbol, side, qty, now_ms=None):
         left -= take
         if left <= qty * 1e-10:
             break
+    if evidence is not None:
+        evidence.update(filled=qty-left, unfilled=max(0.,left))
     if left > qty * 1e-10:
         raise ValueError('INSUFFICIENT_DEPTH_WITHIN_PRICE_LIMIT')
     return {'symbol': symbol, 'side': side, 'amount': qty, 'limit_price': price,
@@ -205,11 +227,23 @@ def check(ex, p, opening=False, private=True):
 
     try:
         funding = ex.fetch_funding_rate(p['perp'])
+        metrics['funding_observation'] = {k:funding.get(k) for k in ('symbol','fundingRate','fundingTimestamp','info')}
         rate = num(funding['fundingRate'])
         next_ts = num(funding['fundingTimestamp'])
         now_ms = time.time() * 1000
         if not 0 < next_ts - now_ms <= 24 * 3600000:
+            info = funding.get('info') or {}
+            # 只认新鲜、同合约、同一期的原始响应；不把 nextFundingTime 配给旧费率。
+            if (info.get('instId') == p['perp'].replace('/','-').replace(':USDT','-SWAP')
+                    and info.get('method') == 'current_period'
+                    and num(info.get('fundingTime', -1)) == next_ts
+                    and 0 <= now_ms-next_ts <= MAX_SNAPSHOT_MS
+                    and 0 <= now_ms-num(info.get('ts', -1)) <= MAX_BOOK_AGE_MS
+                    and 0 < num(info.get('nextFundingTime', -1))-now_ms <= 24*3600000):
+                metrics['funding_status'] = 'AWAITING_NEXT_PERIOD'
+                raise ValueError('FUNDING_PERIOD_ROLLOVER_PENDING')
             raise ValueError('FUNDING_CLOCK_INVALID')
+        metrics['funding_status'] = 'CURRENT'
         metrics.update(funding_rate=rate, funding_timestamp=next_ts)
         report['evidence_at']['funding'] = time.time()
         if rate < 0:
@@ -224,10 +258,12 @@ def check(ex, p, opening=False, private=True):
         qty = quantities.get(key)
         if qty is None or qty == 0:
             continue
+        evidence = {}
         try:
-            metrics[name + '_execution'] = execution(ex, p[name], side, qty)
+            metrics[name + '_execution'] = execution(ex, p[name], side, qty, evidence=evidence)
             report['evidence_at'][name + '_book'] = time.time()
         except Exception as exc:
+            metrics[name + '_execution_evidence'] = evidence
             gap(name + '_book', exc, affects_risk=False)
     spot, perp = metrics['spot_execution'], metrics['perp_execution']
     if spot and perp:

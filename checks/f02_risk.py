@@ -99,6 +99,69 @@ class RiskTests(unittest.TestCase):
         self.assertIsNotNone(r['metrics']['perp_execution'])
         self.assertTrue(any('INSUFFICIENT_DEPTH' in g for g in r['gaps']))
 
+    def test_failed_depth_keeps_replayable_book(self):
+        book={'timestamp':int(time.time()*1000),'asks':[[100.01,100]],'bids':[[100,.001]]}
+        with patch.object(self.ex,'fetch_order_book',return_value=book):
+            r=self.run_check()
+        evidence=r['metrics']['spot_execution_evidence']
+        self.assertEqual(evidence['book'],book)
+        self.assertAlmostEqual(evidence['filled'],.001)
+        self.assertAlmostEqual(evidence['unfilled'],1.999)
+        with patch.object(self.ex,'fetch_order_book',return_value=evidence['book']):
+            with self.assertRaisesRegex(ValueError,'INSUFFICIENT_DEPTH'):
+                c.execution(self.ex,self.p['spot'],'sell',evidence['requested'],evidence['checked_at_ms'])
+
+    def test_funding_rollover_never_relabels_old_rate(self):
+        now=1789142400000
+        f={'fundingRate':-.001,'fundingTimestamp':now,'info':{'instId':'BTC-USDT-SWAP',
+           'method':'current_period','fundingTime':str(now),'nextFundingTime':str(now+28800000),'ts':str(now)}}
+        with patch('time.time',return_value=(now+1000)/1000), patch.object(self.ex,'fetch_funding_rate',return_value=f):
+            r=self.run_check()
+        self.assertEqual(r['metrics']['funding_status'],'AWAITING_NEXT_PERIOD')
+        self.assertEqual(r['action'],'BLOCK')
+        self.assertNotIn('funding_rate',r['metrics'])
+        self.assertNotIn('FUNDING_NEGATIVE',r['reasons'])
+        self.assertEqual(r['metrics']['funding_observation']['info'],f['info'])
+        with patch('time.time',return_value=(now+11000)/1000), patch.object(self.ex,'fetch_funding_rate',return_value=f):
+            r=self.run_check()
+        self.assertTrue(any('FUNDING_CLOCK_INVALID' in g for g in r['gaps']))
+        for key,value in [('instId','ETH-USDT-SWAP'),('ts',str(now-6000)),('fundingTime',str(now-1)),('nextFundingTime',str(now))]:
+            bad=copy.deepcopy(f);bad['info'][key]=value
+            with patch('time.time',return_value=(now+1000)/1000), patch.object(self.ex,'fetch_funding_rate',return_value=bad):
+                r=self.run_check()
+            self.assertTrue(any('FUNDING_CLOCK_INVALID' in g for g in r['gaps']))
+            self.assertNotIn('funding_status',r['metrics'])
+        f['fundingTimestamp']=now+28800000;f['info']['fundingTime']=str(now+28800000)
+        with patch('time.time',return_value=(now+12000)/1000), patch.object(self.ex,'fetch_funding_rate',return_value=f):
+            r=self.run_check()
+        self.assertEqual(r['metrics']['funding_status'],'CURRENT')
+        self.assertIn('FUNDING_NEGATIVE',r['reasons'])
+
+    def test_rounding_preserves_executable_depth_on_both_sides(self):
+        from f08_paper import Exchange as PaperExchange
+        import paper_a
+        from decimal import Decimal, ROUND_UP, ROUND_DOWN
+        for side, rounding in [('sell', ROUND_DOWN), ('buy', ROUND_UP)]:
+            with self.subTest(side=side):
+                ex = PaperExchange()
+                ex.price_to_precision = lambda s, v: str(Decimal(str(v)).quantize(Decimal('.01'), rounding=rounding))
+                book = {'timestamp': int(time.time()*1000),
+                        'bids': [[99.9, .2], [99.8, .2], [98, 100]],
+                        'asks': [[100.01, .2], [100.1, .2], [101, 100]]}
+                ex.fetch_order_book = lambda *a, **k: book
+                expected = paper_a.quote(ex, 'BTC/USDT', side, .3)
+                actual = c.execution(ex, 'BTC/USDT', side, .3)
+                self.assertEqual(expected['status'], 'FILLED')
+                self.assertAlmostEqual(actual['vwap'], float(expected['vwap']))
+                self.assertEqual(actual['limit_price'], float(expected['limit_price']))
+                with self.assertRaisesRegex(ValueError, 'INSUFFICIENT_DEPTH'):
+                    c.execution(ex, 'BTC/USDT', side, .5)
+
+    def test_precision_fallback_cannot_cross_cap(self):
+        with patch.object(self.ex, 'price_to_precision', return_value='1'):
+            with self.assertRaisesRegex(ValueError, 'PRICE_PRECISION_OUTSIDE_CAP'):
+                c.execution(self.ex, 'BTC/USDT', 'sell', 1)
+
     def test_funding_failure_does_not_hide_private_risk(self):
         self.low_risk()
         with patch.object(self.ex, 'fetch_funding_rate', side_effect=TimeoutError('offline')):
