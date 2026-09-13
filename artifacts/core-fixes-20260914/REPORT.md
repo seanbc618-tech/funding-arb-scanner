@@ -16,3 +16,13 @@
 旧测试 fixture 只有 funding.info，新执行路径需要 CCXT 统一 fundingRate/fundingTimestamp，已补齐 fixture。两个“部分成交后恢复”用例改为在预检成功后盘口才变薄，仍验证部分成交恢复；预检时已不足现在应零成交拒绝。初次测试失败日志记录在 initial.json，最终逐脚本日志及 verification.json 为修复后结果。没有通过弱化断言跳过恢复校验。
 
 本地生产代码变更仅 allocate_a.py、paper_a.py、paper_loop.py、paper_notify.py；旧未提交交接、F20 和其他产物保留。资金费模型及严格验收规则不变。若后续部署交易模块，须新建冻结观察期，旧期不可覆盖。
+
+## 2026-09-14 部署完成
+
+修复提交 aa02d6a；不可变发布 releases/f16-core-aa02d6a。远端 391 项检查及通知专项 10 类通过，本地 410 包含未部署 F20 的 19 项。
+
+持锁审计并切换 allocate_a.py、paper_a.py、paper_loop.py；通知服务切换到同一提交的 paper_notify.py。模拟账本、通知游标切换时字节不变，旧通知回执保留且无新增投递。旧观察 1097 个样本保留不再改写。未实盘交易，未推送 Git，F20 未混入发布。
+
+重启后 paper PID 1322900、通知 PID 1322901，均 active/running、NRestarts=0。第 23 轮扫描成功记录距检查 7.782 秒，报告距检查 0.385 秒；运行源码及参数匹配发布和冻结合同，pending=false，审计通过。BTC 对冲持仓保留，ETH 空仓，订单记录仍 18 条。
+
+新观察目录 evidence/f16-core-observation-20260913T201254Z，北京时间 09-14 04:12:54 开始，最早 09-17 04:12:54 满 72 小时。23 样本 OBSERVING、gaps=[]，必需事件尚未覆盖，不能宣称 F16 验收通过或证明盈利。证据见 activation.json、remote-validation.json、remote-verification.json；执行脚本 deploy.py、verify.py。
