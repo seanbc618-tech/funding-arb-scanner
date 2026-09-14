@@ -70,6 +70,26 @@ class Loop(unittest.TestCase):
   self.c.s['trades']['x']={'orders':[{'executed_at_ms':1,'quote':{'kind':'perp','filled':'1','symbol':'BTC/USDT:USDT'}}]}
   with patch.object(self.c.ex,'publicGetPublicFundingRateHistory',return_value={'code':'0','data':[]}):
    self.assertEqual(loop.collect_funding(self.c.ex,self.c.s)[0]['gap'],'INVALID_DECLARED_GAP_HISTORY_TRUNCATED')
+ def test_collect_preserves_failed_mark_response(self):
+  import f09_funding as fixture
+  case=fixture.Funding();case.setUp();self.addCleanup(case.doCleanups)
+  history=copy.deepcopy(case.ex.rate)
+  history['data'].append({**history['data'][0],'fundingTime':str(fixture.T-28800000)})
+  for response in ({'code':'50011','data':[]}, {'code':'0','data':[[str(fixture.T),'100','101','99','100','0']]}):
+   with patch.object(case.ex,'publicGetPublicFundingRateHistory',return_value=history),patch.object(case.ex,'publicGetMarketHistoryMarkPriceCandles',return_value=response):
+    cycle=loop.collect_funding(case.ex,case.s)[0]['cycles'][0]
+   self.assertEqual(cycle['price'],response)
+   before=case.s['cash_usdt']
+   result=loop.paper_funding.settle(case.s,case.path,loop.CachedFunding(case.ex,cycle),fixture.S,fixture.T)
+   self.assertEqual(result['status'],'INVALID_DECLARED_GAP')
+   self.assertEqual(result['price_response'],response)
+   self.assertEqual(case.s['cash_usdt'],before)
+  with patch.object(case.ex,'publicGetPublicFundingRateHistory',return_value=history),patch.object(case.ex,'publicGetMarketHistoryMarkPriceCandles',side_effect=TimeoutError):
+   cycle=loop.collect_funding(case.ex,case.s)[0]['cycles'][0]
+  self.assertIsNone(cycle['price'])
+  result=loop.paper_funding.settle(case.s,case.path,loop.CachedFunding(case.ex,cycle),fixture.S,fixture.T)
+  self.assertEqual(result['gap'],'MARK_FETCH_FAILED:TimeoutError')
+  self.assertEqual(case.s['cash_usdt'],before)
  def test_collect_legacy_gap(self):
   self.c.s['trades']['x']={'orders':[{'quote':{'kind':'perp','filled':'1','symbol':'BTC/USDT:USDT'}}]}
   self.assertEqual(loop.collect_funding(self.c.ex,self.c.s)[0]['gap'],'LEGACY_FILL_TIME_MISSING')

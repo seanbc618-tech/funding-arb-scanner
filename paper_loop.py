@@ -60,11 +60,14 @@ def collect_funding(ex,state):
                 old=state.get('funding',{}).get(f'{symbol}:{at}',{})
                 if old.get('status') in ('POSTED','NO_POSITION'):continue
                 # F09 自己校验真实周期与行情；缓存原始返回避免主进程等待扫描请求。
-                cycle={'at':at,'rate':{'code':'0','data':[row]},'price':{'code':'0','data':[]}}
+                cycle={'at':at,'rate':{'code':'0','data':[row]},'price':None}
+                evidence={}
                 try:
-                    candle,_=paper_funding.public_price(ex,symbol,at)
-                    cycle['price']['data']=[candle]
-                except Exception as exc:cycle['price_gap']=type(exc).__name__
+                    paper_funding.public_price(ex,symbol,at,evidence=evidence)
+                except Exception as exc:
+                    cycle['price_gap']=str(exc) if isinstance(exc,ValueError) else type(exc).__name__
+                finally:
+                    if 'response' in evidence:cycle['price']=evidence['response']
                 item['cycles'].append(cycle)
         except Exception as exc:item['gap']=str(exc) if isinstance(exc,ValueError) else type(exc).__name__
         batches.append(item)
@@ -166,7 +169,9 @@ def positions_ready(reports):
 class CachedFunding:
     def __init__(self,ex,cycle):self.markets=ex.markets;self.cycle=cycle
     def publicGetPublicFundingRateHistory(self,params):return self.cycle['rate']
-    def publicGetMarketHistoryMarkPriceCandles(self,params):return self.cycle['price']
+    def publicGetMarketHistoryMarkPriceCandles(self,params):
+        if self.cycle['price'] is None:raise ValueError('MARK_FETCH_FAILED:'+self.cycle.get('price_gap','UNKNOWN'))
+        return self.cycle['price']
 
 
 def tick(path,ex,inbox,limits,auto_exit=False,max_hold_hours=None,auto_recover=False,switch_policy=None):

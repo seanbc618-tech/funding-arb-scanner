@@ -75,10 +75,12 @@ def public_cycle(ex, symbol, at):
     return row, dec(row['realizedRate'])  # 不使用预测 fundingRate。
 
 
-def public_price(ex, symbol, at):
+def public_price(ex, symbol, at, evidence=None):
     response = ex.publicGetMarketHistoryMarkPriceCandles(
         {'instId':ex.markets[symbol]['id'], 'bar':'1m',
          'before':str(at-1), 'after':str(at+60000), 'limit':'100'})
+    if evidence is not None:
+        evidence['response'] = response
     if str(response.get('code'))!='0':
         raise ValueError('MARK_API_ERROR')
     rows = [r for r in response['data'] if integer(r[0])==at]
@@ -111,7 +113,11 @@ def settle(state, path, ex, symbol, at, now=None):
         if base==0:
             entry.update(status='NO_POSITION',payment_usdt='0')
         else:
-            candle,price=public_price(ex,symbol,at)
+            price_evidence={}
+            try:
+                candle,price=public_price(ex,symbol,at,evidence=price_evidence)
+            finally:
+                if 'response' in price_evidence:entry['price_response']=price_evidence['response']
             entry.update(status='POSTED',payment_usdt=str(base*price*rate),
                          mark_price=str(price),price_evidence=candle)
     except (ValueError,KeyError,TypeError,ArithmeticError) as exc:
