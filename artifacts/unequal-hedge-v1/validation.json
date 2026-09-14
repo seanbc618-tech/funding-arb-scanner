@@ -1,0 +1,122 @@
+[
+  {
+    "file": "checks/f01_f06_review.py",
+    "returncode": 0,
+    "tests": 10
+  },
+  {
+    "file": "checks/f01_reconciliation.py",
+    "returncode": 0,
+    "tests": 18
+  },
+  {
+    "file": "checks/f02_risk.py",
+    "returncode": 0,
+    "tests": 38
+  },
+  {
+    "file": "checks/f03_notify.py",
+    "returncode": 0,
+    "tests": 19
+  },
+  {
+    "file": "checks/f04_accounting.py",
+    "returncode": 0,
+    "tests": 18
+  },
+  {
+    "file": "checks/f05_portfolio.py",
+    "returncode": 0,
+    "tests": 21
+  },
+  {
+    "file": "checks/f06_reports.py",
+    "returncode": 0,
+    "tests": 25
+  },
+  {
+    "file": "checks/f07_execution.py",
+    "returncode": 0,
+    "tests": 22
+  },
+  {
+    "file": "checks/f07_review.py",
+    "returncode": 0,
+    "tests": 4
+  },
+  {
+    "file": "checks/f08_paper.py",
+    "returncode": 0,
+    "tests": 20
+  },
+  {
+    "file": "checks/f09_funding.py",
+    "returncode": 0,
+    "tests": 24
+  },
+  {
+    "file": "checks/f10_f12_review.py",
+    "returncode": 0,
+    "tests": 6
+  },
+  {
+    "file": "checks/f10_rank.py",
+    "returncode": 0,
+    "tests": 17
+  },
+  {
+    "file": "checks/f11_allocate.py",
+    "returncode": 0,
+    "tests": 23
+  },
+  {
+    "file": "checks/f12_loop.py",
+    "returncode": 0,
+    "tests": 17
+  },
+  {
+    "file": "checks/f13_exit.py",
+    "returncode": 0,
+    "tests": 16
+  },
+  {
+    "file": "checks/f14_f15.py",
+    "returncode": 0,
+    "tests": 22
+  },
+  {
+    "file": "checks/f14_f16_review.py",
+    "returncode": 0,
+    "tests": 4
+  },
+  {
+    "file": "checks/f16_acceptance.py",
+    "returncode": 0,
+    "tests": 15
+  },
+  {
+    "file": "checks/f20_maker.py",
+    "returncode": 0,
+    "tests": 19
+  },
+  {
+    "file": "checks/funding_arb_regression.py",
+    "returncode": 0,
+    "tests": 24
+  },
+  {
+    "file": "checks/funding_modules_regression.py",
+    "returncode": 0,
+    "tests": 29
+  },
+  {
+    "file": "artifacts/unequal-hedge-v1/check.py",
+    "returncode": 0,
+    "tests": 13
+  },
+  {
+    "file": "artifacts/paper-notifications/check.py",
+    "returncode": 0,
+    "tests": 0
+  }
+]
