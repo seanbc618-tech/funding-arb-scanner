@@ -112,7 +112,7 @@
   {
     "file": "artifacts/unequal-hedge-v1/check.py",
     "returncode": 0,
-    "tests": 13
+    "tests": 15
   },
   {
     "file": "artifacts/paper-notifications/check.py",

@@ -80,6 +80,15 @@ class Check(unittest.TestCase):
   a=self.s['groups']['2'];self.assertGreater(u.dec(a['meta']['BTC']['extra']),0)
   self.assertIn('BTC',a['pending_actions']);self.assertIsNone(r['rows'][2]['liquidation_value'])
   self.tick(T+8000,103);self.assertEqual(u.dec(a['meta']['BTC']['extra']),0)
+ def test_short_data_failure_still_exits_on_recovery(self):
+  self.opened();self.s['force_gap_exit']=True
+  self.tick(T+4000)
+  self.assertEqual(self.s['groups']['2']['pending_actions']['BTC']['reason'],'DATA_GAP_EXIT')
+ def test_unsettled_funding_blocks_overlay(self):
+  self.tick(T)
+  for a in self.s['groups'].values():a['funding']['missing']={'status':'INVALID_DECLARED_GAP','payment_usdt':None}
+  self.tick(T+2000)
+  self.assertEqual(u.dec(self.s['groups']['2']['meta']['BTC']['extra']),0)
  def test_daily_kill_and_no_martingale(self):
   self.cfg['daily_loss']='1';self.s=u.initial(self.cfg,T);self.opened();self.tick(T+4000,100.1)
   a=self.s['groups']['3'];self.assertTrue(a['daily_halted']);self.assertIn('BTC',a['pending_actions'])

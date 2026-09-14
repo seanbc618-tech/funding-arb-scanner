@@ -128,6 +128,7 @@ def advance(s,frame,markets,precision):
     if s['last_at_ms'] is not None and now<=s['last_at_ms']:raise ValueError('NONMONOTONIC_FRAME')
     delayed=s['last_at_ms'] is not None and now-s['last_at_ms']>cfg['max_gap_ms']
     if delayed:s['coverage_gaps'].append(dict(at_ms=now,gap='OBSERVATION_TIME_GAP'))
+    delayed=delayed or s.pop('force_gap_exit',False)
     s['last_at_ms']=now
     ex=ReplayExchange({'markets':markets,'precision_mode':precision},frame)
     if frame.get('gap'):raise ValueError(frame['gap'])
@@ -163,7 +164,7 @@ def advance(s,frame,markets,precision):
         if a['day']!=day(now):a.update(day=day(now),day_anchor=str(increment),daily_halted=False)
         if increment<=-dec(cfg['total_loss']):a['halted']=True
         if increment-dec(a['day_anchor'])<=-dec(cfg['daily_loss']):a['daily_halted']=True
-        blocked=a['halted'] or a.get('daily_halted',False) or ending
+        blocked=a['halted'] or a.get('daily_halted',False) or ending or any(e['status']!='POSTED' for e in a['funding'].values())
         for coin in cfg['coins']:
             m=a['meta'][coin];sp,pe=coin+'/USDT',coin+'/USDT:USDT'
             size=dec(markets[pe]['contractSize']);ask=dec(frame['books'][pe]['asks'][0][0])
@@ -300,7 +301,7 @@ def run(directory,cycles=0):
                 new['last_frame']=frame_path.name;audit(new);save(path,new);s=new
             except (ValueError,KeyError,TypeError,ArithmeticError,ccxt.BaseError) as err:
                 now=stamp();gap=str(err) if isinstance(err,ValueError) else type(err).__name__
-                s['coverage_gaps'].append(dict(at_ms=now,gap=gap));save(path,s)
+                s['coverage_gaps'].append(dict(at_ms=now,gap=gap));s['force_gap_exit']=True;save(path,s)
                 result=dict(at_ms=now,status='INVALID_DECLARED_GAP',gap=gap,rows=[],scope='NO_FABRICATED_FILL_OR_PRICE')
             save(directory/'report.json',result)
             print(json.dumps(dict(at_ms=result['at_ms'],status=result['status'],gap=result.get('gap'))),flush=True)
