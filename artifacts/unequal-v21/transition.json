@@ -1,0 +1,853 @@
+{
+  "release": "/home/sean/funding-arb/releases/unequal-v21-daa0522",
+  "directory": "/home/sean/funding-arb/experiments/unequal-v21-20260915T173138Z",
+  "previous_directory": "/home/sean/funding-arb/experiments/unequal-v2-20260915T092647Z",
+  "previous_status": "SUPERSEDED_EARLY_INVALID_GAPS",
+  "previous_state_sha256": "f25bed135d9d70751a09452075afedee9406e19a2d368e111339d01001fcebf6",
+  "previous_final_report": {
+    "at_ms": 1789493498290,
+    "status": "OBSERVING",
+    "strategy": "v2",
+    "signals": {
+      "BTC": {
+        "at": 1789493400000,
+        "short": false,
+        "exit": false,
+        "reset": false,
+        "regime_at": 1789493400000,
+        "regime": false,
+        "entry_cross": false,
+        "atr": "108.0928571428571428571428571",
+        "support": "76157.3",
+        "close": "76480.1",
+        "fast_15m": "76420.105",
+        "slow_15m": "76959.78"
+      },
+      "ETH": {
+        "at": 1789493400000,
+        "short": false,
+        "exit": false,
+        "reset": false,
+        "regime_at": 1789493400000,
+        "regime": true,
+        "entry_cross": false,
+        "atr": "4.687857142857142857142857143",
+        "support": "2411.32",
+        "close": "2423.88",
+        "fast_15m": "2435.8365",
+        "slow_15m": "2468.239833333333333333333333"
+      }
+    },
+    "scope": "FORWARD_PUBLIC_DEPTH_SIMULATION_NOT_REAL_FILLS",
+    "coverage_gaps": [
+      {
+        "at_ms": 1789471979006,
+        "gap": "RequestTimeout"
+      },
+      {
+        "at_ms": 1789487436886,
+        "gap": "RequestTimeout"
+      },
+      {
+        "at_ms": 1789487442999,
+        "gap": "OBSERVATION_TIME_GAP"
+      },
+      {
+        "at_ms": 1789488709712,
+        "gap": "RequestTimeout"
+      },
+      {
+        "at_ms": 1789490923093,
+        "gap": "BOOK_TIME_GAP"
+      },
+      {
+        "at_ms": 1789490930110,
+        "gap": "OBSERVATION_TIME_GAP"
+      },
+      {
+        "at_ms": 1789493135850,
+        "gap": "RequestTimeout"
+      }
+    ],
+    "signal_gaps": {},
+    "rows": [
+      {
+        "ratio": "1",
+        "equity": "19994.245080460428923110300",
+        "liquidation_value": "19988.314062440428923110300",
+        "net_pnl": null,
+        "diagnostic_net_pnl": "-11.685937559571076889700",
+        "excess_vs_1x": null,
+        "max_drawdown": "7.031899900",
+        "fees": "5.996859900",
+        "funding": "0.150780360428923110300",
+        "overlay_entries": 0,
+        "stop_fills": 0,
+        "pending": {},
+        "meta": {
+          "BTC": {
+            "base_contracts": "2.6",
+            "extra": "0",
+            "cooldown_until": 0,
+            "entries": 0,
+            "entry_day": "2026-09-15",
+            "regime_seen": 1789493400000,
+            "armed": true
+          },
+          "ETH": {
+            "base_contracts": "8.08",
+            "extra": "0",
+            "cooldown_until": 0,
+            "entries": 0,
+            "entry_day": "2026-09-15",
+            "regime_seen": 1789493400000,
+            "armed": true
+          }
+        },
+        "funding_gaps": [],
+        "realized_ratios": {
+          "BTC": "1",
+          "ETH": "1"
+        }
+      },
+      {
+        "ratio": "1.25",
+        "equity": "19990.603813120428923110300",
+        "liquidation_value": "19984.672795100428923110300",
+        "net_pnl": null,
+        "diagnostic_net_pnl": "-15.327204899571076889700",
+        "excess_vs_1x": null,
+        "max_drawdown": "10.126484465",
+        "fees": "7.494367240",
+        "funding": "0.150780360428923110300",
+        "overlay_entries": 3,
+        "stop_fills": 2,
+        "pending": {},
+        "meta": {
+          "BTC": {
+            "base_contracts": "2.6",
+            "extra": "0.00",
+            "cooldown_until": 1789494941491,
+            "entries": 2,
+            "entry_day": "2026-09-15",
+            "regime_seen": 1789493400000,
+            "entry_evidence": {
+              "signal": {
+                "at": 1789491600000,
+                "short": true,
+                "exit": false,
+                "reset": false,
+                "regime_at": 1789491600000,
+                "regime": true,
+                "entry_cross": true,
+                "atr": "124.4928571428571428571428571",
+                "support": "75751.9",
+                "close": "76353.5",
+                "fast_15m": "76474.605",
+                "slow_15m": "77012.45"
+              },
+              "economics": {
+                "pass": true,
+                "room": "596.0",
+                "cost": "152.79585",
+                "distance": "248.9857142857142857142857142"
+              },
+              "entry_quote": {
+                "symbol": "BTC/USDT:USDT",
+                "side": "sell",
+                "kind": "perp",
+                "contract_size": "0.01",
+                "requested": "0.65",
+                "filled": "0.65",
+                "unfilled": "0.00",
+                "notional_usdt": "496.26135",
+                "vwap": "76347.9",
+                "limit_price": "76341.5",
+                "best": "76347.9",
+                "book_timestamp": 1789491603700,
+                "levels": [
+                  [
+                    "76347.9",
+                    "0.65"
+                  ]
+                ],
+                "slippage_bps": "0",
+                "status": "FILLED"
+              },
+              "exit_quote": {
+                "symbol": "BTC/USDT:USDT",
+                "side": "buy",
+                "kind": "perp",
+                "contract_size": "0.01",
+                "requested": "0.65",
+                "filled": "0.65",
+                "unfilled": "0.00",
+                "notional_usdt": "496.26200",
+                "vwap": "76348.0",
+                "limit_price": "76356.7",
+                "best": "76348.0",
+                "book_timestamp": 1789491603700,
+                "levels": [
+                  [
+                    "76348.0",
+                    "0.65"
+                  ]
+                ],
+                "slippage_bps": "0",
+                "status": "FILLED"
+              }
+            },
+            "armed": false,
+            "entry": "76347.9",
+            "distance": "248.9857142857142857142857142",
+            "stop": "76596.88571428571428571428571",
+            "best": "76157.5",
+            "opened_at": 1789491603941,
+            "last_exit_signal": 1789493100000
+          },
+          "ETH": {
+            "base_contracts": "8.08",
+            "extra": "0.00",
+            "cooldown_until": 1789471017139,
+            "entries": 1,
+            "entry_day": "2026-09-15",
+            "regime_seen": 1789493400000,
+            "entry_evidence": {
+              "signal": {
+                "at": 1789466400000,
+                "short": true,
+                "exit": false,
+                "reset": false,
+                "regime_at": 1789466400000,
+                "regime": true,
+                "entry_cross": true,
+                "atr": "2.860714285714285714285714286",
+                "support": "2463.12",
+                "close": "2473.15",
+                "fast_15m": "2480.3965",
+                "slow_15m": "2511.0075"
+              },
+              "economics": {
+                "pass": true,
+                "room": "10.91",
+                "cost": "4.958065",
+                "distance": "5.721428571428571428571428572"
+              },
+              "entry_quote": {
+                "symbol": "ETH/USDT:USDT",
+                "side": "sell",
+                "kind": "perp",
+                "contract_size": "0.1",
+                "requested": "2.02",
+                "filled": "2.02",
+                "unfilled": "0.00",
+                "notional_usdt": "499.75406",
+                "vwap": "2474.03",
+                "limit_price": "2473.46",
+                "best": "2474.03",
+                "book_timestamp": 1789466431952,
+                "levels": [
+                  [
+                    "2474.03",
+                    "2.02"
+                  ]
+                ],
+                "slippage_bps": "0",
+                "status": "FILLED"
+              },
+              "exit_quote": {
+                "symbol": "ETH/USDT:USDT",
+                "side": "buy",
+                "kind": "perp",
+                "contract_size": "0.1",
+                "requested": "2.02",
+                "filled": "2.02",
+                "unfilled": "0.00",
+                "notional_usdt": "499.75608",
+                "vwap": "2474.04",
+                "limit_price": "2474.54",
+                "best": "2474.04",
+                "book_timestamp": 1789466431952,
+                "levels": [
+                  [
+                    "2474.04",
+                    "2.02"
+                  ]
+                ],
+                "slippage_bps": "0",
+                "status": "FILLED"
+              }
+            },
+            "armed": true,
+            "entry": "2474.03",
+            "distance": "5.721428571428571428571428572",
+            "stop": "2479.751428571428571428571429",
+            "best": "2470.49",
+            "opened_at": 1789466431992,
+            "last_exit_signal": 1789469100000
+          }
+        },
+        "funding_gaps": [],
+        "realized_ratios": {
+          "BTC": "1.0",
+          "ETH": "1"
+        }
+      },
+      {
+        "ratio": "1.5",
+        "equity": "19986.96254578042892311030000",
+        "liquidation_value": "19981.03152776042892311030000",
+        "net_pnl": null,
+        "diagnostic_net_pnl": "-18.96847223957107688970000",
+        "excess_vs_1x": null,
+        "max_drawdown": "13.63589421957107688970000",
+        "fees": "8.991874580",
+        "funding": "0.150780360428923110300",
+        "overlay_entries": 3,
+        "stop_fills": 2,
+        "pending": {},
+        "meta": {
+          "BTC": {
+            "base_contracts": "2.6",
+            "extra": "0.0",
+            "cooldown_until": 1789494941491,
+            "entries": 2,
+            "entry_day": "2026-09-15",
+            "regime_seen": 1789493400000,
+            "entry_evidence": {
+              "signal": {
+                "at": 1789491600000,
+                "short": true,
+                "exit": false,
+                "reset": false,
+                "regime_at": 1789491600000,
+                "regime": true,
+                "entry_cross": true,
+                "atr": "124.4928571428571428571428571",
+                "support": "75751.9",
+                "close": "76353.5",
+                "fast_15m": "76474.605",
+                "slow_15m": "77012.45"
+              },
+              "economics": {
+                "pass": true,
+                "room": "596.0",
+                "cost": "152.79585",
+                "distance": "248.9857142857142857142857142"
+              },
+              "entry_quote": {
+                "symbol": "BTC/USDT:USDT",
+                "side": "sell",
+                "kind": "perp",
+                "contract_size": "0.01",
+                "requested": "1.3",
+                "filled": "1.3",
+                "unfilled": "0.0",
+                "notional_usdt": "992.5227",
+                "vwap": "76347.9",
+                "limit_price": "76341.5",
+                "best": "76347.9",
+                "book_timestamp": 1789491603700,
+                "levels": [
+                  [
+                    "76347.9",
+                    "1.3"
+                  ]
+                ],
+                "slippage_bps": "0",
+                "status": "FILLED"
+              },
+              "exit_quote": {
+                "symbol": "BTC/USDT:USDT",
+                "side": "buy",
+                "kind": "perp",
+                "contract_size": "0.01",
+                "requested": "1.3",
+                "filled": "1.3",
+                "unfilled": "0.0",
+                "notional_usdt": "992.5240",
+                "vwap": "76348.0",
+                "limit_price": "76356.7",
+                "best": "76348.0",
+                "book_timestamp": 1789491603700,
+                "levels": [
+                  [
+                    "76348.0",
+                    "1.3"
+                  ]
+                ],
+                "slippage_bps": "0",
+                "status": "FILLED"
+              }
+            },
+            "armed": false,
+            "entry": "76347.9",
+            "distance": "248.9857142857142857142857142",
+            "stop": "76596.88571428571428571428571",
+            "best": "76157.5",
+            "opened_at": 1789491603941,
+            "last_exit_signal": 1789493100000
+          },
+          "ETH": {
+            "base_contracts": "8.08",
+            "extra": "0.00",
+            "cooldown_until": 1789471017139,
+            "entries": 1,
+            "entry_day": "2026-09-15",
+            "regime_seen": 1789493400000,
+            "entry_evidence": {
+              "signal": {
+                "at": 1789466400000,
+                "short": true,
+                "exit": false,
+                "reset": false,
+                "regime_at": 1789466400000,
+                "regime": true,
+                "entry_cross": true,
+                "atr": "2.860714285714285714285714286",
+                "support": "2463.12",
+                "close": "2473.15",
+                "fast_15m": "2480.3965",
+                "slow_15m": "2511.0075"
+              },
+              "economics": {
+                "pass": true,
+                "room": "10.91",
+                "cost": "4.958065",
+                "distance": "5.721428571428571428571428572"
+              },
+              "entry_quote": {
+                "symbol": "ETH/USDT:USDT",
+                "side": "sell",
+                "kind": "perp",
+                "contract_size": "0.1",
+                "requested": "4.04",
+                "filled": "4.04",
+                "unfilled": "0.00",
+                "notional_usdt": "999.50812",
+                "vwap": "2474.03",
+                "limit_price": "2473.46",
+                "best": "2474.03",
+                "book_timestamp": 1789466431952,
+                "levels": [
+                  [
+                    "2474.03",
+                    "4.04"
+                  ]
+                ],
+                "slippage_bps": "0",
+                "status": "FILLED"
+              },
+              "exit_quote": {
+                "symbol": "ETH/USDT:USDT",
+                "side": "buy",
+                "kind": "perp",
+                "contract_size": "0.1",
+                "requested": "4.04",
+                "filled": "4.04",
+                "unfilled": "0.00",
+                "notional_usdt": "999.51216",
+                "vwap": "2474.04",
+                "limit_price": "2474.54",
+                "best": "2474.04",
+                "book_timestamp": 1789466431952,
+                "levels": [
+                  [
+                    "2474.04",
+                    "4.04"
+                  ]
+                ],
+                "slippage_bps": "0",
+                "status": "FILLED"
+              }
+            },
+            "armed": true,
+            "entry": "2474.03",
+            "distance": "5.721428571428571428571428572",
+            "stop": "2479.751428571428571428571429",
+            "best": "2470.49",
+            "opened_at": 1789466431992,
+            "last_exit_signal": 1789469100000
+          }
+        },
+        "funding_gaps": [],
+        "realized_ratios": {
+          "BTC": "1",
+          "ETH": "1"
+        }
+      },
+      {
+        "ratio": "2",
+        "equity": "19979.680011100428923110300",
+        "liquidation_value": "19973.748993080428923110300",
+        "net_pnl": null,
+        "diagnostic_net_pnl": "-26.251006919571076889700",
+        "excess_vs_1x": null,
+        "max_drawdown": "20.918428899571076889700",
+        "fees": "11.986889260",
+        "funding": "0.150780360428923110300",
+        "overlay_entries": 3,
+        "stop_fills": 2,
+        "pending": {},
+        "meta": {
+          "BTC": {
+            "base_contracts": "2.6",
+            "extra": "0.0",
+            "cooldown_until": 1789494941491,
+            "entries": 2,
+            "entry_day": "2026-09-15",
+            "regime_seen": 1789493400000,
+            "entry_evidence": {
+              "signal": {
+                "at": 1789491600000,
+                "short": true,
+                "exit": false,
+                "reset": false,
+                "regime_at": 1789491600000,
+                "regime": true,
+                "entry_cross": true,
+                "atr": "124.4928571428571428571428571",
+                "support": "75751.9",
+                "close": "76353.5",
+                "fast_15m": "76474.605",
+                "slow_15m": "77012.45"
+              },
+              "economics": {
+                "pass": true,
+                "room": "596.0",
+                "cost": "152.79585",
+                "distance": "248.9857142857142857142857142"
+              },
+              "entry_quote": {
+                "symbol": "BTC/USDT:USDT",
+                "side": "sell",
+                "kind": "perp",
+                "contract_size": "0.01",
+                "requested": "2.6",
+                "filled": "2.6",
+                "unfilled": "0.0",
+                "notional_usdt": "1985.0454",
+                "vwap": "76347.9",
+                "limit_price": "76341.5",
+                "best": "76347.9",
+                "book_timestamp": 1789491603700,
+                "levels": [
+                  [
+                    "76347.9",
+                    "2.6"
+                  ]
+                ],
+                "slippage_bps": "0",
+                "status": "FILLED"
+              },
+              "exit_quote": {
+                "symbol": "BTC/USDT:USDT",
+                "side": "buy",
+                "kind": "perp",
+                "contract_size": "0.01",
+                "requested": "2.6",
+                "filled": "2.6",
+                "unfilled": "0.0",
+                "notional_usdt": "1985.0480",
+                "vwap": "76348.0",
+                "limit_price": "76356.7",
+                "best": "76348.0",
+                "book_timestamp": 1789491603700,
+                "levels": [
+                  [
+                    "76348.0",
+                    "2.6"
+                  ]
+                ],
+                "slippage_bps": "0",
+                "status": "FILLED"
+              }
+            },
+            "armed": false,
+            "entry": "76347.9",
+            "distance": "248.9857142857142857142857142",
+            "stop": "76596.88571428571428571428571",
+            "best": "76157.5",
+            "opened_at": 1789491603941,
+            "last_exit_signal": 1789493100000
+          },
+          "ETH": {
+            "base_contracts": "8.08",
+            "extra": "0.00",
+            "cooldown_until": 1789471017139,
+            "entries": 1,
+            "entry_day": "2026-09-15",
+            "regime_seen": 1789493400000,
+            "entry_evidence": {
+              "signal": {
+                "at": 1789466400000,
+                "short": true,
+                "exit": false,
+                "reset": false,
+                "regime_at": 1789466400000,
+                "regime": true,
+                "entry_cross": true,
+                "atr": "2.860714285714285714285714286",
+                "support": "2463.12",
+                "close": "2473.15",
+                "fast_15m": "2480.3965",
+                "slow_15m": "2511.0075"
+              },
+              "economics": {
+                "pass": true,
+                "room": "10.91",
+                "cost": "4.958065",
+                "distance": "5.721428571428571428571428572"
+              },
+              "entry_quote": {
+                "symbol": "ETH/USDT:USDT",
+                "side": "sell",
+                "kind": "perp",
+                "contract_size": "0.1",
+                "requested": "8.08",
+                "filled": "8.08",
+                "unfilled": "0.00",
+                "notional_usdt": "1999.01624",
+                "vwap": "2474.03",
+                "limit_price": "2473.46",
+                "best": "2474.03",
+                "book_timestamp": 1789466431952,
+                "levels": [
+                  [
+                    "2474.03",
+                    "8.08"
+                  ]
+                ],
+                "slippage_bps": "0",
+                "status": "FILLED"
+              },
+              "exit_quote": {
+                "symbol": "ETH/USDT:USDT",
+                "side": "buy",
+                "kind": "perp",
+                "contract_size": "0.1",
+                "requested": "8.08",
+                "filled": "8.08",
+                "unfilled": "0.00",
+                "notional_usdt": "1999.02432",
+                "vwap": "2474.04",
+                "limit_price": "2474.54",
+                "best": "2474.04",
+                "book_timestamp": 1789466431952,
+                "levels": [
+                  [
+                    "2474.04",
+                    "8.08"
+                  ]
+                ],
+                "slippage_bps": "0",
+                "status": "FILLED"
+              }
+            },
+            "armed": true,
+            "entry": "2474.03",
+            "distance": "5.721428571428571428571428572",
+            "stop": "2479.751428571428571428571429",
+            "best": "2470.49",
+            "opened_at": 1789466431992,
+            "last_exit_signal": 1789469100000
+          }
+        },
+        "funding_gaps": [],
+        "realized_ratios": {
+          "BTC": "1",
+          "ETH": "1"
+        }
+      },
+      {
+        "ratio": "3",
+        "equity": "19965.11494174042892311030001",
+        "liquidation_value": "19959.18392372042892311030001",
+        "net_pnl": null,
+        "diagnostic_net_pnl": "-40.81607627957107688969999",
+        "excess_vs_1x": null,
+        "max_drawdown": "36.34292511957107688970000",
+        "fees": "17.976918620",
+        "funding": "0.150780360428923110300",
+        "overlay_entries": 3,
+        "stop_fills": 2,
+        "pending": {},
+        "meta": {
+          "BTC": {
+            "base_contracts": "2.6",
+            "extra": "0.0",
+            "cooldown_until": 1789494941491,
+            "entries": 2,
+            "entry_day": "2026-09-15",
+            "regime_seen": 1789493400000,
+            "entry_evidence": {
+              "signal": {
+                "at": 1789491600000,
+                "short": true,
+                "exit": false,
+                "reset": false,
+                "regime_at": 1789491600000,
+                "regime": true,
+                "entry_cross": true,
+                "atr": "124.4928571428571428571428571",
+                "support": "75751.9",
+                "close": "76353.5",
+                "fast_15m": "76474.605",
+                "slow_15m": "77012.45"
+              },
+              "economics": {
+                "pass": true,
+                "room": "596.0",
+                "cost": "152.79585",
+                "distance": "248.9857142857142857142857142"
+              },
+              "entry_quote": {
+                "symbol": "BTC/USDT:USDT",
+                "side": "sell",
+                "kind": "perp",
+                "contract_size": "0.01",
+                "requested": "5.2",
+                "filled": "5.2",
+                "unfilled": "0.0",
+                "notional_usdt": "3970.0908",
+                "vwap": "76347.9",
+                "limit_price": "76341.5",
+                "best": "76347.9",
+                "book_timestamp": 1789491603700,
+                "levels": [
+                  [
+                    "76347.9",
+                    "5.2"
+                  ]
+                ],
+                "slippage_bps": "0",
+                "status": "FILLED"
+              },
+              "exit_quote": {
+                "symbol": "BTC/USDT:USDT",
+                "side": "buy",
+                "kind": "perp",
+                "contract_size": "0.01",
+                "requested": "5.2",
+                "filled": "5.2",
+                "unfilled": "0.0",
+                "notional_usdt": "3970.0960",
+                "vwap": "76348.0",
+                "limit_price": "76356.7",
+                "best": "76348.0",
+                "book_timestamp": 1789491603700,
+                "levels": [
+                  [
+                    "76348.0",
+                    "5.2"
+                  ]
+                ],
+                "slippage_bps": "0",
+                "status": "FILLED"
+              }
+            },
+            "armed": false,
+            "entry": "76347.9",
+            "distance": "248.9857142857142857142857142",
+            "stop": "76596.88571428571428571428571",
+            "best": "76157.5",
+            "opened_at": 1789491603941,
+            "last_exit_signal": 1789493100000
+          },
+          "ETH": {
+            "base_contracts": "8.08",
+            "extra": "0.00",
+            "cooldown_until": 1789471017139,
+            "entries": 1,
+            "entry_day": "2026-09-15",
+            "regime_seen": 1789493400000,
+            "entry_evidence": {
+              "signal": {
+                "at": 1789466400000,
+                "short": true,
+                "exit": false,
+                "reset": false,
+                "regime_at": 1789466400000,
+                "regime": true,
+                "entry_cross": true,
+                "atr": "2.860714285714285714285714286",
+                "support": "2463.12",
+                "close": "2473.15",
+                "fast_15m": "2480.3965",
+                "slow_15m": "2511.0075"
+              },
+              "economics": {
+                "pass": true,
+                "room": "10.91",
+                "cost": "4.958065",
+                "distance": "5.721428571428571428571428572"
+              },
+              "entry_quote": {
+                "symbol": "ETH/USDT:USDT",
+                "side": "sell",
+                "kind": "perp",
+                "contract_size": "0.1",
+                "requested": "16.16",
+                "filled": "16.16",
+                "unfilled": "0.00",
+                "notional_usdt": "3998.03248",
+                "vwap": "2474.03",
+                "limit_price": "2473.46",
+                "best": "2474.03",
+                "book_timestamp": 1789466431952,
+                "levels": [
+                  [
+                    "2474.03",
+                    "16.16"
+                  ]
+                ],
+                "slippage_bps": "0",
+                "status": "FILLED"
+              },
+              "exit_quote": {
+                "symbol": "ETH/USDT:USDT",
+                "side": "buy",
+                "kind": "perp",
+                "contract_size": "0.1",
+                "requested": "16.16",
+                "filled": "16.16",
+                "unfilled": "0.00",
+                "notional_usdt": "3998.04864",
+                "vwap": "2474.04",
+                "limit_price": "2474.54",
+                "best": "2474.04",
+                "book_timestamp": 1789466431952,
+                "levels": [
+                  [
+                    "2474.04",
+                    "16.16"
+                  ]
+                ],
+                "slippage_bps": "0",
+                "status": "FILLED"
+              }
+            },
+            "armed": true,
+            "entry": "2474.03",
+            "distance": "5.721428571428571428571428572",
+            "stop": "2479.751428571428571428571429",
+            "best": "2470.49",
+            "opened_at": 1789466431992,
+            "last_exit_signal": 1789469100000
+          }
+        },
+        "funding_gaps": [],
+        "realized_ratios": {
+          "BTC": "1",
+          "ETH": "1"
+        }
+      }
+    ]
+  },
+  "preserved_pids": {
+    "funding-arb-paper.service": "1367895",
+    "funding-arb-unequal.service": "1417157",
+    "funding-arb-unequal-notify.service": "1417265"
+  },
+  "activated_at_ms": 1789493504908
+}

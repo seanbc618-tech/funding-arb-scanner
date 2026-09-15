@@ -1,0 +1,237 @@
+{
+  "audit": "PASS",
+  "sources": "MATCH",
+  "old_state": "UNCHANGED",
+  "start_beijing": "2026-09-16T01:31:41.129000+08:00",
+  "report": {
+    "at_ms": 1789493533243,
+    "status": "OBSERVING",
+    "strategy": "v2",
+    "signals": {
+      "BTC": {
+        "at": 1789493400000,
+        "short": false,
+        "exit": false,
+        "reset": false,
+        "regime_at": 1789493400000,
+        "regime": false,
+        "entry_cross": false,
+        "atr": "108.0928571428571428571428571",
+        "support": "76157.3",
+        "close": "76480.1",
+        "fast_15m": "76420.105",
+        "slow_15m": "76959.78"
+      },
+      "ETH": {
+        "at": 1789493400000,
+        "short": false,
+        "exit": false,
+        "reset": false,
+        "regime_at": 1789493400000,
+        "regime": true,
+        "entry_cross": false,
+        "atr": "4.687857142857142857142857143",
+        "support": "2411.32",
+        "close": "2423.88",
+        "fast_15m": "2435.8365",
+        "slow_15m": "2468.239833333333333333333333"
+      }
+    },
+    "scope": "FORWARD_PUBLIC_DEPTH_SIMULATION_NOT_REAL_FILLS",
+    "coverage_gaps": [],
+    "signal_gaps": {},
+    "rows": [
+      {
+        "ratio": "1",
+        "equity": "19993.488106560",
+        "liquidation_value": "19987.493612950",
+        "net_pnl": "-12.506387050",
+        "diagnostic_net_pnl": "-12.506387050",
+        "excess_vs_1x": "0E-9",
+        "max_drawdown": "6.511893440",
+        "fees": "5.985873440",
+        "funding": "0",
+        "overlay_entries": 0,
+        "stop_fills": 0,
+        "pending": {},
+        "meta": {
+          "BTC": {
+            "base_contracts": "2.6",
+            "extra": "0",
+            "cooldown_until": 0,
+            "entries": 0,
+            "entry_day": "2026-09-15",
+            "regime_seen": 1789493400000
+          },
+          "ETH": {
+            "base_contracts": "8.23",
+            "extra": "0",
+            "cooldown_until": 0,
+            "entries": 0,
+            "entry_day": "2026-09-15",
+            "regime_seen": 1789493400000
+          }
+        },
+        "funding_gaps": [],
+        "realized_ratios": {
+          "BTC": "1",
+          "ETH": "1"
+        }
+      },
+      {
+        "ratio": "1.25",
+        "equity": "19993.488106560",
+        "liquidation_value": "19987.493612950",
+        "net_pnl": "-12.506387050",
+        "diagnostic_net_pnl": "-12.506387050",
+        "excess_vs_1x": "0E-9",
+        "max_drawdown": "6.511893440",
+        "fees": "5.985873440",
+        "funding": "0",
+        "overlay_entries": 0,
+        "stop_fills": 0,
+        "pending": {},
+        "meta": {
+          "BTC": {
+            "base_contracts": "2.6",
+            "extra": "0",
+            "cooldown_until": 0,
+            "entries": 0,
+            "entry_day": "2026-09-15",
+            "regime_seen": 1789493400000
+          },
+          "ETH": {
+            "base_contracts": "8.23",
+            "extra": "0",
+            "cooldown_until": 0,
+            "entries": 0,
+            "entry_day": "2026-09-15",
+            "regime_seen": 1789493400000
+          }
+        },
+        "funding_gaps": [],
+        "realized_ratios": {
+          "BTC": "1",
+          "ETH": "1"
+        }
+      },
+      {
+        "ratio": "1.5",
+        "equity": "19993.488106560",
+        "liquidation_value": "19987.493612950",
+        "net_pnl": "-12.506387050",
+        "diagnostic_net_pnl": "-12.506387050",
+        "excess_vs_1x": "0E-9",
+        "max_drawdown": "6.511893440",
+        "fees": "5.985873440",
+        "funding": "0",
+        "overlay_entries": 0,
+        "stop_fills": 0,
+        "pending": {},
+        "meta": {
+          "BTC": {
+            "base_contracts": "2.6",
+            "extra": "0",
+            "cooldown_until": 0,
+            "entries": 0,
+            "entry_day": "2026-09-15",
+            "regime_seen": 1789493400000
+          },
+          "ETH": {
+            "base_contracts": "8.23",
+            "extra": "0",
+            "cooldown_until": 0,
+            "entries": 0,
+            "entry_day": "2026-09-15",
+            "regime_seen": 1789493400000
+          }
+        },
+        "funding_gaps": [],
+        "realized_ratios": {
+          "BTC": "1",
+          "ETH": "1"
+        }
+      },
+      {
+        "ratio": "2",
+        "equity": "19993.488106560",
+        "liquidation_value": "19987.493612950",
+        "net_pnl": "-12.506387050",
+        "diagnostic_net_pnl": "-12.506387050",
+        "excess_vs_1x": "0E-9",
+        "max_drawdown": "6.511893440",
+        "fees": "5.985873440",
+        "funding": "0",
+        "overlay_entries": 0,
+        "stop_fills": 0,
+        "pending": {},
+        "meta": {
+          "BTC": {
+            "base_contracts": "2.6",
+            "extra": "0",
+            "cooldown_until": 0,
+            "entries": 0,
+            "entry_day": "2026-09-15",
+            "regime_seen": 1789493400000
+          },
+          "ETH": {
+            "base_contracts": "8.23",
+            "extra": "0",
+            "cooldown_until": 0,
+            "entries": 0,
+            "entry_day": "2026-09-15",
+            "regime_seen": 1789493400000
+          }
+        },
+        "funding_gaps": [],
+        "realized_ratios": {
+          "BTC": "1",
+          "ETH": "1"
+        }
+      },
+      {
+        "ratio": "3",
+        "equity": "19993.488106560",
+        "liquidation_value": "19987.493612950",
+        "net_pnl": "-12.506387050",
+        "diagnostic_net_pnl": "-12.506387050",
+        "excess_vs_1x": "0E-9",
+        "max_drawdown": "6.511893440",
+        "fees": "5.985873440",
+        "funding": "0",
+        "overlay_entries": 0,
+        "stop_fills": 0,
+        "pending": {},
+        "meta": {
+          "BTC": {
+            "base_contracts": "2.6",
+            "extra": "0",
+            "cooldown_until": 0,
+            "entries": 0,
+            "entry_day": "2026-09-15",
+            "regime_seen": 1789493400000
+          },
+          "ETH": {
+            "base_contracts": "8.23",
+            "extra": "0",
+            "cooldown_until": 0,
+            "entries": 0,
+            "entry_day": "2026-09-15",
+            "regime_seen": 1789493400000
+          }
+        },
+        "funding_gaps": [],
+        "realized_ratios": {
+          "BTC": "1",
+          "ETH": "1"
+        }
+      }
+    ]
+  },
+  "notification": {
+    "status": "CONFIRMED",
+    "message_id": 4238,
+    "attempted_at": 1789493504.9411104
+  },
+  "services": "MainPID=1434697\nNRestarts=0\nId=funding-arb-unequal-v2.service\nActiveState=active\n\nMainPID=1434703\nNRestarts=0\nId=funding-arb-unequal-v2-notify.service\nActiveState=active\n"
+}
