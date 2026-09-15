@@ -1,4 +1,4 @@
-import copy,importlib.util,sys,unittest
+import copy,importlib.util,sys,unittest,threading
 from pathlib import Path
 from unittest.mock import patch
 root=Path(__file__).resolve().parents[2];sys.path.insert(0,str(root))
@@ -7,6 +7,29 @@ import unequal_signals_v2 as v
 spec=importlib.util.spec_from_file_location('fixture',root/'artifacts/unequal-hedge-v1/check.py');f=importlib.util.module_from_spec(spec);spec.loader.exec_module(f)
 T=f.T
 class Check(unittest.TestCase):
+ def test_parallel_books_use_four_independent_clients(self):
+  barrier=threading.Barrier(4,timeout=3)
+  class Client:
+   def set_markets(self,markets,currencies):self.markets=markets
+   def fetch_order_book(self,symbol,limit):
+    barrier.wait();return {'symbol':symbol,'timestamp':T,'limit':limit}
+  class Exchange:markets={};currencies={}
+  with patch.object(u.ccxt,'okx',side_effect=lambda cfg:Client()):c=u.Collector(Exchange(),u.V21_CONFIG)
+  self.addCleanup(c.pool.shutdown)
+  c.cached={'candles':{},'funding':{},'history':{},'mark_candles':{}};c.updated=T
+  with patch.object(u,'stamp',return_value=T):r=c.frame({'started_at_ms':T})
+  self.assertEqual(len(r['books']),4);self.assertEqual(len({id(x) for x in c.clients.values()}),4)
+  self.assertTrue(all(k==v['symbol'] for k,v in r['books'].items()))
+ def test_failed_lane_drains_other_workers_and_identifies_endpoint(self):
+  from concurrent.futures import ThreadPoolExecutor
+  c=object.__new__(u.Collector);c.pool=ThreadPoolExecutor(max_workers=2);self.addCleanup(c.pool.shutdown)
+  done=threading.Event()
+  class Broken:
+   def fetch_order_book(self):raise u.ccxt.RequestTimeout('sensitive response')
+  def finish():done.set();return 1
+  with self.assertRaisesRegex(ValueError,'COLLECTOR:BTC:fetch_order_book:RequestTimeout'):
+   c.collect([(c.request,(Broken(),'fetch_order_book','BTC')),(finish,())])
+  self.assertTrue(done.is_set())
  def setUp(self):
   self.cfg={**u.V2_CONFIG,'coins':['BTC']};self.s=u.initial(self.cfg,T)
   self.sig=dict(at=T,short=True,exit=False,reset=False,regime_at=T,regime=True,entry_cross=True,atr='.1',support='90')

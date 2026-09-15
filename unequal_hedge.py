@@ -6,6 +6,7 @@ import fcntl
 import hashlib
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,6 +25,7 @@ CONFIG = dict(ratios=['1','1.25','1.5','2','3'], coins=['BTC','ETH'], cash='2000
               max_hold_ms=21600000, max_daily_entries=4, buffer='1000')
 
 V2_CONFIG={**CONFIG,'strategy':'v2','candle_bar':'5m','candle_limit':300,'candle_age_ms':450000}
+V21_CONFIG={**V2_CONFIG,'collector_revision':'parallel-v1','display_version':'V2.1'}
 
 def stamp(): return int(time.time()*1000)
 def day(at): return datetime.fromtimestamp(at/1000,timezone.utc).date().isoformat()
@@ -289,30 +291,63 @@ def sig_for_report(s,frame):
     return out
 
 class Collector:
-    def __init__(self,ex,cfg):self.ex=ex;self.cfg=cfg;self.cached={};self.updated=0
+    def __init__(self,ex,cfg):
+        self.ex=ex;self.cfg=cfg;self.cached={};self.updated=0
+        self.pool=ThreadPoolExecutor(max_workers=4)
+        self.clients={}
+        for coin in cfg['coins']:
+            for sym in (coin+'/USDT',coin+'/USDT:USDT'):
+                client=ccxt.okx({'timeout':5000})
+                client.set_markets(ex.markets,ex.currencies)
+                self.clients[sym]=client
+
+    def request(self,ex,method,symbol,*args,**kwargs):
+        try:return getattr(ex,method)(*args,**kwargs)
+        except ccxt.BaseError as err:
+            # Public endpoint and error class only; never persist request headers.
+            raise ValueError(f'COLLECTOR:{symbol}:{method}:{type(err).__name__}') from err
+
+    def refresh(self,coin,s,now):
+        sym=coin+'/USDT:USDT';ex=self.clients[sym];inst=ex.markets[sym]['id']
+        response=self.request(ex,'publicGetMarketCandles',sym,{'instId':inst,'bar':self.cfg.get('candle_bar','1m'),'limit':str(self.cfg.get('candle_limit',100))})
+        if str(response.get('code'))!='0':raise ValueError('CANDLE_API_ERROR:'+sym)
+        candles=response['data'];rate=self.request(ex,'fetch_funding_rate',sym,sym)
+        response=self.request(ex,'publicGetPublicFundingRateHistory',sym,{'instId':inst,'limit':'100'})
+        if str(response.get('code'))!='0':raise ValueError('FUNDING_API_ERROR:'+sym)
+        history=response['data'];marks=[]
+        for row in history:
+            at=int(row['fundingTime']);key=sym+':'+str(at)
+            if at<s['started_at_ms'] or at>now-60000:continue
+            if all(a['funding'].get(key,{}).get('status')=='POSTED' for a in s['groups'].values()):continue
+            response_price=self.request(ex,'publicGetMarketHistoryMarkPriceCandles',sym,{'instId':inst,'bar':'1m','before':str(at-1),'after':str(at+60000),'limit':'100'})
+            if str(response_price.get('code'))!='0':raise ValueError('MARK_API_ERROR:'+sym)
+            marks.extend(response_price['data'])
+        return coin,sym,inst,candles,rate,history,marks
+
+    def collect(self,jobs):
+        futures=[self.pool.submit(fn,*args) for fn,args in jobs]
+        # Drain every lane before returning or raising: a client is never used
+        # by an old unfinished frame and a new frame concurrently.
+        results=[];failure=None
+        for future in futures:
+            try:results.append(future.result())
+            except Exception as err:
+                if failure is None:failure=err
+        if failure is not None:raise failure
+        return results
+
     def frame(self,s):
-        ex=self.ex;now=stamp();frame={'books':{},'at_ms':now}
+        now=stamp();frame={'books':{},'at_ms':now}
         if now-self.updated>=30000 or not self.cached:
             data={'candles':{},'funding':{},'history':{},'mark_candles':{}}
-            for coin in self.cfg['coins']:
-                sym=coin+'/USDT:USDT';inst=ex.markets[sym]['id']
-                response=ex.publicGetMarketCandles({'instId':inst,'bar':self.cfg.get('candle_bar','1m'),'limit':str(self.cfg.get('candle_limit',100))})
-                if str(response.get('code'))!='0':raise ValueError('CANDLE_API_ERROR')
-                data['candles'][coin]=response['data'];data['funding'][sym]=ex.fetch_funding_rate(sym)
-                response=ex.publicGetPublicFundingRateHistory({'instId':inst,'limit':'100'})
-                if str(response.get('code'))!='0':raise ValueError('FUNDING_API_ERROR')
-                data['history'][inst]=response['data'];data['mark_candles'][inst]=[]
-                for row in response['data']:
-                    at=int(row['fundingTime']);key=sym+':'+str(at)
-                    if at<s['started_at_ms'] or at>now-60000:continue
-                    if all(a['funding'].get(key,{}).get('status')=='POSTED' for a in s['groups'].values()):continue
-                    response_price=ex.publicGetMarketHistoryMarkPriceCandles({'instId':inst,'bar':'1m','before':str(at-1),'after':str(at+60000),'limit':'100'})
-                    if str(response_price.get('code'))!='0':raise ValueError('MARK_API_ERROR')
-                    data['mark_candles'][inst].extend(response_price['data'])
+            for coin,sym,inst,candles,rate,history,marks in self.collect([(self.refresh,(coin,s,now)) for coin in self.cfg['coins']]):
+                data['candles'][coin]=candles;data['funding'][sym]=rate
+                data['history'][inst]=history;data['mark_candles'][inst]=marks
             self.cached=data;self.updated=stamp()
         frame.update(copy.deepcopy(self.cached))
-        for coin in self.cfg['coins']:
-            for sym in (coin+'/USDT',coin+'/USDT:USDT'):frame['books'][sym]=ex.fetch_order_book(sym,limit=50)
+        symbols=list(self.clients)
+        books=self.collect([(self.request,(self.clients[sym],'fetch_order_book',sym,sym,50)) for sym in symbols])
+        frame['books']=dict(zip(symbols,books))
         frame['at_ms']=stamp();return frame
 
 def run(directory,cycles=0,cfg=None):
@@ -353,5 +388,6 @@ def run(directory,cycles=0,cfg=None):
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--directory',required=True);p.add_argument('--cycles',type=int,default=0)
     p.add_argument('--v2',action='store_true')
-    a=p.parse_args();run(a.directory,a.cycles,V2_CONFIG if a.v2 else CONFIG)
+    p.add_argument('--v21',action='store_true')
+    a=p.parse_args();run(a.directory,a.cycles,V21_CONFIG if a.v21 else V2_CONFIG if a.v2 else CONFIG)
 if __name__=='__main__':main()
