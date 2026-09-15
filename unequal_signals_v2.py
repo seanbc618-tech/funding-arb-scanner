@@ -4,7 +4,7 @@ from accounting import dec
 
 def signals(rows,now,cfg):
     bars=sorted([r for r in rows if str(r[-1])=='1' and int(r[0])+300000<=now],key=lambda r:int(r[0]))
-    if len(bars)<195 or not 0<=now-int(bars[-1][0])-300000<=150000:raise ValueError('V2_CANDLE_HISTORY_GAP')
+    if len(bars)<195 or not 0<=now-int(bars[-1][0])-300000<=cfg['candle_age_ms']:raise ValueError('V2_CANDLE_HISTORY_GAP')
     if any(int(b[0])-int(a[0])!=300000 for a,b in zip(bars,bars[1:])):raise ValueError('V2_CANDLE_INTERVAL_GAP')
     for b in bars:
         o,h,l,c=map(dec,b[1:5])

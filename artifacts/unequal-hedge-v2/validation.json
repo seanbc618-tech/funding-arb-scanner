@@ -117,7 +117,7 @@
   {
     "file": "artifacts/unequal-hedge-v2/check.py",
     "code": 0,
-    "tests": 11
+    "tests": 12
   },
   {
     "file": "artifacts/unequal-notify/check.py",

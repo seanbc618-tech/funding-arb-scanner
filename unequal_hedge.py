@@ -23,7 +23,7 @@ CONFIG = dict(ratios=['1','1.25','1.5','2','3'], coins=['BTC','ETH'], cash='2000
               max_trade_risk='40', daily_loss='100', total_loss='400', cooldown_ms=1800000,
               max_hold_ms=21600000, max_daily_entries=4, buffer='1000')
 
-V2_CONFIG={**CONFIG,'strategy':'v2','candle_bar':'5m','candle_limit':300}
+V2_CONFIG={**CONFIG,'strategy':'v2','candle_bar':'5m','candle_limit':300,'candle_age_ms':450000}
 
 def stamp(): return int(time.time()*1000)
 def day(at): return datetime.fromtimestamp(at/1000,timezone.utc).date().isoformat()

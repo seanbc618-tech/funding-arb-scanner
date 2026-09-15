@@ -35,6 +35,9 @@ class Check(unittest.TestCase):
   s=v.signals(self.bars(),T,self.cfg);self.assertTrue(s['short']);self.assertFalse(s['exit']);self.assertFalse(s['reset'])
  def test_unfinished_candle_cannot_change_signal(self):
   rows=self.bars();old=v.signals(rows,T,self.cfg);rows.append([T,'300','400','200','400','0']);self.assertEqual(old,v.signals(rows,T,self.cfg))
+ def test_completed_five_minute_bar_remains_valid_until_next_close(self):
+  rows=self.bars();self.assertTrue(v.signals(rows,T+299000,self.cfg)['short'])
+  with self.assertRaisesRegex(ValueError,'HISTORY_GAP'):v.signals(rows,T+451000,self.cfg)
  def test_missing_bar_rejected(self):
   rows=self.bars();rows.pop(-30)
   with self.assertRaisesRegex(ValueError,'INTERVAL_GAP'):v.signals(rows,T,self.cfg)
