@@ -1,6 +1,7 @@
 """独立公共行情前向实验；无账户凭据、无真实订单，固定五组与因果止损。"""
 import argparse
 import copy
+import decimal
 import fcntl
 import hashlib
 import json
@@ -22,6 +23,8 @@ CONFIG = dict(ratios=['1','1.25','1.5','2','3'], coins=['BTC','ETH'], cash='2000
               max_trade_risk='40', daily_loss='100', total_loss='400', cooldown_ms=1800000,
               max_hold_ms=21600000, max_daily_entries=4, buffer='1000')
 
+V2_CONFIG={**CONFIG,'strategy':'v2','candle_bar':'5m','candle_limit':300}
+
 def stamp(): return int(time.time()*1000)
 def day(at): return datetime.fromtimestamp(at/1000,timezone.utc).date().isoformat()
 def digest(x): return hashlib.sha256(json.dumps(x,sort_keys=True).encode()).hexdigest()
@@ -31,6 +34,9 @@ def position(s,sym): return dec(s['positions'].get(sym,{}).get('quantity','0'))
 def log(s,event): s['events'].append(event)
 
 def signals(rows,now,cfg):
+    if cfg.get('strategy')=='v2':
+        from unequal_signals_v2 import signals as v2_signals
+        return v2_signals(rows,now,cfg)
     bars=sorted([r for r in rows if str(r[-1])=='1' and int(r[0])+60000<=now],key=lambda r:int(r[0]))[-(cfg['slow']+2):]
     if len(bars)<cfg['slow']+2 or not 0<=now-(int(bars[-1][0])+60000)<=cfg['candle_age_ms']:raise ValueError('CANDLE_HISTORY_GAP')
     if any(int(b[0])-int(a[0])!=60000 for a,b in zip(bars,bars[1:])):raise ValueError('CANDLE_INTERVAL_GAP')
@@ -109,13 +115,22 @@ def settle_all(s,frame,ex):
                     a['funding'][key]=dict(status='INVALID_DECLARED_GAP',payment_usdt=None,at_ms=at,gap=str(err))
 
 def audit(s):
+    with decimal.localcontext() as context:
+        context.rounding=decimal.ROUND_HALF_UP
+        return _audit(s)
+
+def _audit(s):
     cfg=s['config']
     if list(s['groups'])!=cfg['ratios']:raise ValueError('GROUPS_CHANGED')
     for a in s['groups'].values():
         rebuilt=paper.initial(cfg['cash'],cfg['spot_fee'],cfg['perp_fee'])
+        posted=set()
         for e in a['events']:
             if e['type']=='FILL':paper.apply_fill(rebuilt,copy.deepcopy(e['order']['quote']))
-        rebuilt['cash_usdt']=str(dec(rebuilt['cash_usdt'])+sum((dec(e['payment_usdt']) for e in a['funding'].values() if e['status']=='POSTED'),dec(0)))
+            elif e['type']=='FUNDING':
+                if e['key'] in posted or dec(e['payment_usdt'])!=dec(a['funding'][e['key']]['payment_usdt']):raise ValueError('FUNDING_EVENT_MISMATCH')
+                posted.add(e['key']);rebuilt['cash_usdt']=str(dec(rebuilt['cash_usdt'])+dec(e['payment_usdt']))
+        if any(e['status']=='POSTED' and dec(e['payment_usdt']) and k not in posted for k,e in a['funding'].items()):raise ValueError('FUNDING_EVENT_MISSING')
         if dec(rebuilt['cash_usdt'])!=dec(a['cash_usdt']) or rebuilt['positions']!=a['positions']:raise ValueError('LEDGER_REPLAY_MISMATCH')
         for coin in cfg['coins']:
             sym=coin+'/USDT:USDT'
@@ -169,17 +184,32 @@ def advance(s,frame,markets,precision):
             m=a['meta'][coin];sp,pe=coin+'/USDT',coin+'/USDT:USDT'
             size=dec(markets[pe]['contractSize']);ask=dec(frame['books'][pe]['asks'][0][0])
             if m['entry_day']!=day(now):m.update(entry_day=day(now),entries=0)
+            v2=cfg.get('strategy')=='v2'
+            if v2 and coin in sig:
+                from unequal_signals_v2 import rearm,economics
+                rearm(m,sig[coin])
             action=a['pending_actions'].get(coin)
             if action and now>action['at_ms']:
                 if action['kind']=='OPEN':
                     allowed=(not blocked and not delayed and coin in sig and sig[coin]['short'] and now-action['at_ms']<=cfg['max_gap_ms'] and dec(frame['funding'][pe]['fundingRate'])>0 and int(frame['funding'][pe]['fundingTimestamp'])>now)
+                    if v2 and allowed:
+                        allowed=sig[coin]['at']==action['signal_at'] and m.get('armed',True) and economics(sig[coin],frame['books'][pe]['bids'][0][0],ask,cfg)['pass']
                     a['pending_actions'].pop(coin)
                     if allowed:
                         qty=dec(action['quantity']);q=paper.quote(ex,pe,'sell',qty,now)
                         distance=dec(action['distance']);entry=dec(q['vwap']) if q['vwap'] else ask
                         risk=qty*size*(distance+entry*(2*dec(cfg['perp_fee'])+dec('0.001')))
-                        if q['status']=='FILLED' and risk<=dec(cfg['max_trade_risk']) and paper.available(a)-dec(cfg['buffer'])>=dec(q['notional_usdt'])*(1+dec(cfg['perp_fee'])):
+                        cost_ok=True
+                        if v2:
+                            closing=paper.quote(ex,pe,'buy',qty,now)
+                            cost_ok=q['status']=='FILLED' and closing['status']=='FILLED'
+                            if cost_ok:
+                                evidence=economics(sig[coin],q['vwap'],closing['vwap'],cfg)
+                                m['entry_evidence']=dict(signal=sig[coin],economics=evidence,entry_quote=q,exit_quote=closing)
+                                cost_ok=evidence['pass']
+                        if cost_ok and q['status']=='FILLED' and risk<=dec(cfg['max_trade_risk']) and paper.available(a)-dec(cfg['buffer'])>=dec(q['notional_usdt'])*(1+dec(cfg['perp_fee'])):
                             q=fill(a,ex,coin,pe,'sell',qty,now,'OVERLAY_OPEN')
+                            if v2:m['armed']=False
                             m.update(extra=q['filled'],entry=q['vwap'],distance=str(distance),stop=str(entry+distance),best=str(ask),opened_at=now,entries=m['entries']+1)
                         else:
                             m['cooldown_until']=now+60000
@@ -196,10 +226,10 @@ def advance(s,frame,markets,precision):
                 # 止损使用可买回的 ask；先检测旧止损，再收紧。绝不放宽。
                 reason=None
                 if ask>=dec(m['stop']):reason='STOP'
-                elif blocked:reason='RISK_OR_END'
+                elif blocked and (not v2 or a['halted'] or a.get('daily_halted',False) or ending):reason='RISK_OR_END'
                 elif delayed or coin in signal_gaps:reason='DATA_GAP_EXIT'
                 elif now-m['opened_at']>=cfg['max_hold_ms']:reason='TIME_EXIT'
-                elif not sig[coin]['short']:reason='TREND_EXIT'
+                elif (sig[coin]['exit'] if v2 else not sig[coin]['short']):reason='TREND_EXIT'
                 if reason:queue_action(a,coin,'CLOSE',now,reason=reason)
                 else:
                     entry=dec(m['entry']);distance=dec(m['distance']);best=min(dec(m['best']),ask);stop=dec(m['stop'])
@@ -210,9 +240,13 @@ def advance(s,frame,markets,precision):
                     m.update(best=str(best),stop=str(stop))
             elif not extra and coin not in a['pending_actions'] and dec(ratio)>1 and not blocked and not delayed and coin in sig:
                 signal=sig[coin]
-                if signal['short'] and now>=m['cooldown_until'] and signal['at']>m.get('last_exit_signal',0)+60000 and m['entries']<cfg['max_daily_entries']:
+                if signal['short'] and (not v2 or m.get('armed',True)) and now>=m['cooldown_until'] and signal['at']>m.get('last_exit_signal',0)+60000 and m['entries']<cfg['max_daily_entries']:
                     current=frame['funding'][pe]
                     if dec(current['fundingRate'])<=0 or int(current['fundingTimestamp'])<=now:continue
+                    if v2:
+                        evidence=economics(signal,frame['books'][pe]['bids'][0][0],ask,cfg)
+                        m['entry_evidence']=dict(signal=signal,economics=evidence)
+                        if not evidence['pass']:continue
                     qty=paper.quantity(ex,pe,dec(m['base_contracts'])*(dec(ratio)-1))
                     distance=max(dec(signal['atr'])*dec(cfg['atr_multiple']),ask*dec(cfg['min_stop_fraction']))
                     queue_action(a,coin,'OPEN',now,quantity=str(qty),distance=str(distance),signal_at=signal['at'])
@@ -245,7 +279,14 @@ def report(s,frame,ex,signal_gaps=None):
                          pending=a['pending_actions'],meta=a['meta'],funding_gaps=gaps,
                          realized_ratios={c:str(position(a,c+'/USDT:USDT')/dec(a['meta'][c]['base_contracts'])) for c in s['config']['coins']}))
     return dict(at_ms=frame['at_ms'],status='FINISHED' if s['finished'] else 'OBSERVING',
-                scope='FORWARD_PUBLIC_DEPTH_SIMULATION_NOT_REAL_FILLS',coverage_gaps=s['coverage_gaps'],signal_gaps=signal_gaps or {},rows=rows)
+                strategy=s['config'].get('strategy','v1'),signals=sig_for_report(s,frame),scope='FORWARD_PUBLIC_DEPTH_SIMULATION_NOT_REAL_FILLS',coverage_gaps=s['coverage_gaps'],signal_gaps=signal_gaps or {},rows=rows)
+
+def sig_for_report(s,frame):
+    out={}
+    for coin in s['config']['coins']:
+        try:out[coin]=signals(frame['candles'][coin],frame['at_ms'],s['config'])
+        except (ValueError,KeyError,TypeError,ArithmeticError) as exc:out[coin]={'gap':str(exc)}
+    return out
 
 class Collector:
     def __init__(self,ex,cfg):self.ex=ex;self.cfg=cfg;self.cached={};self.updated=0
@@ -255,7 +296,7 @@ class Collector:
             data={'candles':{},'funding':{},'history':{},'mark_candles':{}}
             for coin in self.cfg['coins']:
                 sym=coin+'/USDT:USDT';inst=ex.markets[sym]['id']
-                response=ex.publicGetMarketCandles({'instId':inst,'bar':'1m','limit':'100'})
+                response=ex.publicGetMarketCandles({'instId':inst,'bar':self.cfg.get('candle_bar','1m'),'limit':str(self.cfg.get('candle_limit',100))})
                 if str(response.get('code'))!='0':raise ValueError('CANDLE_API_ERROR')
                 data['candles'][coin]=response['data'];data['funding'][sym]=ex.fetch_funding_rate(sym)
                 response=ex.publicGetPublicFundingRateHistory({'instId':inst,'limit':'100'})
@@ -274,7 +315,9 @@ class Collector:
             for sym in (coin+'/USDT',coin+'/USDT:USDT'):frame['books'][sym]=ex.fetch_order_book(sym,limit=50)
         frame['at_ms']=stamp();return frame
 
-def run(directory,cycles=0):
+def run(directory,cycles=0,cfg=None):
+    cfg=CONFIG if cfg is None else cfg
+    decimal.getcontext().rounding=decimal.ROUND_HALF_UP
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
     with (directory/'experiment.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -284,14 +327,14 @@ def run(directory,cycles=0):
         path=directory/'state.json'
         if path.exists():
             contract=json.loads((directory/'contract.json').read_text());s=json.loads(path.read_text())
-            if contract['source_hashes']!=hashes or contract['config']!=CONFIG or contract['ccxt_version']!=ccxt.__version__:raise ValueError('FROZEN_EXPERIMENT_CHANGED')
+            if contract['source_hashes']!=hashes or contract['config']!=cfg or contract['ccxt_version']!=ccxt.__version__:raise ValueError('FROZEN_EXPERIMENT_CHANGED')
         else:
             if (directory/'contract.json').exists():raise ValueError('INITIALIZATION_INCOMPLETE')
-            s=initial(copy.deepcopy(CONFIG),stamp())
-            write_once(directory/'contract.json',dict(config=CONFIG,source_hashes=hashes,ccxt_version=ccxt.__version__,started_at_ms=s['started_at_ms'],markets=ex.markets,precision_mode=ex.precisionMode))
+            s=initial(copy.deepcopy(cfg),stamp())
+            write_once(directory/'contract.json',dict(config=cfg,source_hashes=hashes,ccxt_version=ccxt.__version__,started_at_ms=s['started_at_ms'],markets=ex.markets,precision_mode=ex.precisionMode))
             save(path,s)
         audit(s)
-        collector=Collector(ex,CONFIG);count=0
+        collector=Collector(ex,cfg);count=0
         while not s['finished'] and (not cycles or count<cycles):
             begun=time.monotonic();frame=None
             try:
@@ -305,9 +348,10 @@ def run(directory,cycles=0):
                 result=dict(at_ms=now,status='INVALID_DECLARED_GAP',gap=gap,rows=[],scope='NO_FABRICATED_FILL_OR_PRICE')
             save(directory/'report.json',result)
             print(json.dumps(dict(at_ms=result['at_ms'],status=result['status'],gap=result.get('gap'))),flush=True)
-            count+=1;time.sleep(max(0,CONFIG['poll_seconds']-(time.monotonic()-begun)))
+            count+=1;time.sleep(max(0,cfg['poll_seconds']-(time.monotonic()-begun)))
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--directory',required=True);p.add_argument('--cycles',type=int,default=0)
-    a=p.parse_args();run(a.directory,a.cycles)
+    p.add_argument('--v2',action='store_true')
+    a=p.parse_args();run(a.directory,a.cycles,V2_CONFIG if a.v2 else CONFIG)
 if __name__=='__main__':main()

@@ -30,7 +30,7 @@ def events(state):
 
 def summary(state,report,now,new):
     age=(now*1000-report.get('at_ms',0))/1000
-    lines=['【不等量对冲｜独立PAPER五组】',datetime.fromtimestamp(now,TZ).strftime('%m-%d %H:%M:%S 北京时间'),
+    lines=[f"【不等量对冲 {state.get('config',{}).get('strategy','v1').upper()}｜独立PAPER五组】",datetime.fromtimestamp(now,TZ).strftime('%m-%d %H:%M:%S 北京时间'),
            f"已观察 {(now*1000-state['started_at_ms'])/3600000:.1f} 小时｜状态 {report.get('status','UNKNOWN')}",
            '每组本金 20,000 USDT；倍数为额外信号触发后的目标上限。']
     if new:

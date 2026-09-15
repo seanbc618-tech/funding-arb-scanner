@@ -1,0 +1,132 @@
+[
+  {
+    "file": "checks/f01_f06_review.py",
+    "code": 0,
+    "tests": 10
+  },
+  {
+    "file": "checks/f01_reconciliation.py",
+    "code": 0,
+    "tests": 18
+  },
+  {
+    "file": "checks/f02_risk.py",
+    "code": 0,
+    "tests": 38
+  },
+  {
+    "file": "checks/f03_notify.py",
+    "code": 0,
+    "tests": 19
+  },
+  {
+    "file": "checks/f04_accounting.py",
+    "code": 0,
+    "tests": 18
+  },
+  {
+    "file": "checks/f05_portfolio.py",
+    "code": 0,
+    "tests": 21
+  },
+  {
+    "file": "checks/f06_reports.py",
+    "code": 0,
+    "tests": 25
+  },
+  {
+    "file": "checks/f07_execution.py",
+    "code": 0,
+    "tests": 22
+  },
+  {
+    "file": "checks/f07_review.py",
+    "code": 0,
+    "tests": 4
+  },
+  {
+    "file": "checks/f08_paper.py",
+    "code": 0,
+    "tests": 20
+  },
+  {
+    "file": "checks/f09_funding.py",
+    "code": 0,
+    "tests": 24
+  },
+  {
+    "file": "checks/f10_f12_review.py",
+    "code": 0,
+    "tests": 6
+  },
+  {
+    "file": "checks/f10_rank.py",
+    "code": 0,
+    "tests": 17
+  },
+  {
+    "file": "checks/f11_allocate.py",
+    "code": 0,
+    "tests": 23
+  },
+  {
+    "file": "checks/f12_loop.py",
+    "code": 0,
+    "tests": 17
+  },
+  {
+    "file": "checks/f13_exit.py",
+    "code": 0,
+    "tests": 16
+  },
+  {
+    "file": "checks/f14_f15.py",
+    "code": 0,
+    "tests": 22
+  },
+  {
+    "file": "checks/f14_f16_review.py",
+    "code": 0,
+    "tests": 4
+  },
+  {
+    "file": "checks/f16_acceptance.py",
+    "code": 0,
+    "tests": 15
+  },
+  {
+    "file": "checks/f20_maker.py",
+    "code": 0,
+    "tests": 19
+  },
+  {
+    "file": "checks/funding_arb_regression.py",
+    "code": 0,
+    "tests": 24
+  },
+  {
+    "file": "checks/funding_modules_regression.py",
+    "code": 0,
+    "tests": 29
+  },
+  {
+    "file": "artifacts/unequal-hedge-v1/check.py",
+    "code": 0,
+    "tests": 15
+  },
+  {
+    "file": "artifacts/unequal-hedge-v2/check.py",
+    "code": 0,
+    "tests": 11
+  },
+  {
+    "file": "artifacts/unequal-notify/check.py",
+    "code": 0,
+    "tests": 5
+  },
+  {
+    "file": "artifacts/paper-notifications/check.py",
+    "code": 0,
+    "tests": 0
+  }
+]
