@@ -1,170 +1,139 @@
 # funding-arb-scanner
 
-资金费率研究与 OKX 模式 A 执行原型。扫描与跨所池子不下单；执行器默认空跑，显式 `--live` 才提交订单。
+English | [简体中文](README.zh-CN.md)
 
-七个业务脚本加一个通知入口，依赖 ccxt（记账使用 Python 自带 SQLite），扫描 16 家 CEX/DEX 的永续合约资金费率，按成交量过滤，
-用过去 7 天的历史均值算年化和稳定性，输出三张表：
+Funding-rate research and an OKX Mode A execution prototype. The scanner and cross-exchange pool do not place orders. The executor defaults to dry run; submitting orders requires an explicit `--live` flag.
 
-1. **单所费率榜** — 哪些币的资金费率绝对值最高
-2. **跨所费率差** — 同一个币在 A 所开空、B 所开多，价差年化多少、几天回本
-3. **模式 A 候选** — 同一个所买现货 + 开空永续，扣手续费后的名义年化估算
+The original core consists of seven business scripts and a notification entry point, using ccxt and Python's built-in SQLite for accounting. It scans perpetual funding rates across 16 CEXs/DEXs, filters by trading volume, and uses seven-day historical averages to estimate annualized rates and stability. It produces three tables:
 
-## 用法
+1. **Single-exchange funding ranking** — assets with the highest absolute funding rates.
+2. **Cross-exchange funding spreads** — annualized funding-rate differences and estimated break-even days for shorting an asset on exchange A and going long on exchange B.
+3. **Mode A candidates** — buying spot and shorting a perpetual on the same exchange, with nominal annualized estimates after trading fees.
+
+> The delivery, deployment, and validation notes below preserve the historical record in the Chinese README. They are not a fresh verification of running services or exchange capabilities. Later dated deployment notes supersede earlier delivery status where stated.
+
+## Usage
 
 ```bash
 pip3 install ccxt
 python3 scan.py
 ```
 
-默认直连。本机被墙就 `export SCAN_PROXY=http://127.0.0.1:12334`（Hiddify 混合端口）。
+Connections are direct by default. If a local proxy is needed, set `export SCAN_PROXY=http://127.0.0.1:12334` (the Hiddify mixed proxy port in the original setup).
 
-结果打印到终端，同时存成 `funding_<时间戳>.csv` 和 `spread_<时间戳>.csv`。
+Results are printed to the terminal and saved as `funding_<timestamp>.csv` and `spread_<timestamp>.csv`.
 
-研究与执行入口：
+Research and execution entry points:
 
 ```bash
-python3 verify.py [币名]    # 拉 28 天历史按周切片，验证费率偏差是不是稳定的（默认盯 BTC）
-python3 pool.py             # 模式 C 跨所研究空跑，未接入模式 A
-python3 trade_a.py candidates    # 只查 OKX 模式 A 候选（公共行情）
-python3 trade_a.py open ZEC 200  # 空跑，200 是单腿目标名义，非总投入资金
+python3 verify.py [COIN]         # Check 28 days of history in weekly slices; defaults to BTC
+python3 pool.py                 # Mode C cross-exchange research dry run; separate from Mode A
+python3 trade_a.py candidates   # Query OKX Mode A candidates using public market data
+python3 trade_a.py open ZEC 200 # Dry run; 200 is target notional per leg, not total capital
 python3 trade_a.py status
 python3 trade_a.py close ZEC
 ```
 
-实盘动作须显式加 `--live`，凭证使用 `OKX_API_KEY` / `OKX_SECRET` / `OKX_PASSWORD`。
-当前仅支持 OKX Futures mode (`acctLv=2`)、净持仓 (`net_mode`)、cross 永续和 cash 现货。
-程序只检查，不自动修改账户、杠杆或划转资金。同一币的现货余额和永续仓位不得由其它程序同时操作。
+Live actions require `--live` and the environment variables `OKX_API_KEY`, `OKX_SECRET`, and `OKX_PASSWORD`. Supported account settings are OKX Futures mode (`acctLv=2`), net position mode (`net_mode`), cross-margin perpetuals, and cash spot. The program checks these settings without changing account mode, leverage, or transferring funds. Other programs must not concurrently manage the same asset's spot balance or perpetual position.
 
-空跑和实盘分别保存到脚本目录下的 `positions_a_dry.json` / `positions_a_live.json`，
-进程锁防止同模式并发操作，状态原子写入。旧 `positions_a.json` 非空只会阻止实盘开/平仓和 recover，需人工核对后迁移；空跑与只读检查不会自动读取或修改它。
-订单号在提交前落盘；`create_order` 返回不等于成交。程序查询原单终态、实际成交量和手续费，
-按扣除币本位手续费后的实际现货数量开空；平永续显式 `reduceOnly`。
-真实开平仓均使用带价格上限的 IOC 限价单；未即时成交的部分由交易所撤销。
-下单前重查盘口，记录限价、盘口时点和预估 VWAP；部分成交仍按实际余量恢复。
+Dry-run and live state are stored separately in `positions_a_dry.json` and `positions_a_live.json` beside the scripts. Process locks prevent concurrent operations within the same mode; state writes are atomic. A nonempty legacy `positions_a.json` blocks live open, close, and recover operations until manually reviewed and migrated. Dry runs and read-only checks do not automatically read or modify that legacy file.
 
-遇到超时、未终结订单、缺手续费资料：先运行 `python3 trade_a.py recover ZEC --live`。
-它只查询原订单并核对账户，不补开、不重发、不自动撤单或回滚；查不到订单仍保留待核对记录。
-确认后 `close ZEC --live` 按余量退出。每条腿成交后立即保存，部分平仓可再次 close；
-低于最小数量的尘埃保留待人工处理。已平仓流水保留，status 会核对实际账户与本地余量。
-真实账户和无人值守运行仍未验收；本项目没有安装任何交易定时任务。
+Order identifiers are persisted before submission. A successful `create_order` return is not evidence of a fill. The executor queries the original order's terminal status, actual fills, and fees, then sizes the short against actual spot quantity after fees charged in the base asset. Perpetual closes explicitly use `reduceOnly`.
 
-## 模式 A 记账、检查与管理
+Live opens and closes use IOC limit orders with price bounds. The exchange cancels any unfilled portion. Before submission, the executor refreshes the order book and records the limit price, book timestamp, and estimated VWAP. Recovery follows actual remaining quantities after partial fills.
+
+For timeouts, nonterminal orders, or missing fee evidence, first run `python3 trade_a.py recover ZEC --live`. Recovery only queries original orders and reconciles the account: it does not open replacement positions, resubmit, automatically cancel, or roll back orders. An unlocated order remains pending reconciliation. After verification, `close ZEC --live` exits the remaining quantity. State is saved after each leg fills; a partial close can be followed by another close. Dust below minimum size remains for manual handling. Closed-cycle history is retained, and status reconciles actual account positions with local remaining quantities.
+
+Real-account operation and unattended execution have not been accepted as production-ready. The original delivery did not install trading schedules.
+
+## Mode A accounting, checks, and management
 
 ```bash
-python3 check_a.py ZEC --notional 200           # 公共盘口与计划对冲检查
-python3 check_a.py ZEC --notional 200 --account # 再查真实账户模式、余额、保证金
-python3 check_a.py ZEC --account                # 检查本地实盘持仓与真实账户
-python3 accounting.py ZEC                      # 只读真实账户，采集当前轮成交/账单并核算
-python3 accounting.py ZEC --previous 1         # 上一轮；不会更改仓位记录
-python3 manage_a.py                            # 单次空跑状态检查与建议
-python3 manage_a.py --account                  # 单次真实账户只读建议
-python3 manage_a.py --live                     # 显式允许本次退出决策触发真实平仓
+python3 check_a.py ZEC --notional 200           # Public order-book and planned hedge checks
+python3 check_a.py ZEC --notional 200 --account # Also check account mode, balances, and margin
+python3 check_a.py ZEC --account                # Reconcile local live positions with the account
+python3 accounting.py ZEC                      # Read account fills/bills for the current cycle
+python3 accounting.py ZEC --previous 1          # Previous cycle; position records are unchanged
+python3 manage_a.py                            # One dry-run status check and recommendation
+python3 manage_a.py --account                  # One read-only account recommendation
+python3 manage_a.py --live                     # Explicitly permit a real close for this exit decision
 ```
 
-`check_a.py` 的 `--account` 和 `accounting.py` 仅查询私有接口，不提交交易。
-账户检查要求现货余额是明确的有限非负数，持仓及挂单接口返回列表；缺键、null 或非法响应均阻止动作，不能推断为空仓或无挂单。
-实盘状态仍来自独立的 `positions_a_live.json`；旧状态迁移门禁继续有效。
+`check_a.py --account` and `accounting.py` query private endpoints without submitting trades. Account checks require an explicit finite, nonnegative spot balance and list responses from position and open-order endpoints. Missing keys, nulls, or invalid responses block action; they must not be interpreted as no positions or orders. Live state remains in `positions_a_live.json`, with the legacy-state migration gate still enforced.
 
-已选保守默认规则（常量在 `check_a.py` 顶部）：
+Conservative defaults are defined at the top of `check_a.py`:
 
-| 检查 | 默认边界 | 动作 |
+| Check | Default boundary | Action |
 |---|---|---|
-| 盘口 | 两腿 50 档内可完成数量，单腿限价距最优价不超过 20bp | 不足则 BLOCK，平仓也不突破限价 |
-| 时效 | 盘口不超过 5 秒，整次检查不超过 10 秒 | 数据缺失/陈旧则 BLOCK |
-| 开仓基差 | 两腿可执行均价差绝对值不超过 100bp | 超过则禁止开仓 |
-| 开仓资金 | 现货 + 按 1x 预留的永续名义，再加 10% 缓冲 | 不足则禁止开仓，不自动划转或改杠杆 |
-| 净敞口 | 相对较大腿币量不超过 2% | 开仓禁止；持仓建议 EXIT |
-| 保证金率 | OKX 原始 `mgnRatio` 大于 3（300%） | 越线建议 EXIT；缺失则 BLOCK |
-| 空头清算距离 | `(清算价−标记价)/标记价` 大于 10% | 越线建议 EXIT；缺失则 BLOCK |
-| 当前资金费率 | 非负 | 转负建议 EXIT（预测费率仍可能变化） |
+| Order book | Both legs must be executable within 50 levels; each limit price within 20 bps of the best price | BLOCK if insufficient; closes also respect the price bound |
+| Freshness | Book age at most 5 seconds; entire check at most 10 seconds | BLOCK on missing or stale data |
+| Entry basis | Absolute spread between executable average prices at most 100 bps | Block entry if exceeded |
+| Entry capital | Spot cost plus 1x perpetual notional reserve, plus a 10% buffer | Block entry if insufficient; no transfers or leverage changes |
+| Net exposure | At most 2% of the larger leg's asset quantity | Block entry; recommend EXIT for an existing position if exceeded |
+| Margin ratio | Raw OKX `mgnRatio` greater than 3 (300%) | Recommend EXIT on breach; BLOCK if missing |
+| Short liquidation distance | `(liquidation price - mark price) / mark price` greater than 10% | Recommend EXIT on breach; BLOCK if missing |
+| Current funding rate | Nonnegative | Recommend EXIT if negative; predicted rates can still change |
 
-这些是可修改的工程阈值，不是经实盘验证的最佳参数。跨保证金会受账户其它仓位影响，
-管理器平掉本策略不保证解除整个账户的风险。策略不自动开仓、不追逐更高费率、不自动改杠杆。
+These are adjustable engineering thresholds, not optimal parameters validated in live trading. Other account positions affect cross margin; closing this strategy does not guarantee removal of account-wide risk. The strategy does not automatically open positions, chase higher rates, or change leverage.
 
-`manage_a.py` 返回 HOLD / EXIT / BLOCK / CLOSED。opening、closing、needs_close 且资料可核对时
-建议退出。只有 `--live` 且 EXIT 才调用平仓；pending、账户不匹配、盘口不足或资料不全一律 BLOCK。
-F02 将结果拆为三个可同时查看的部分：`risk.status/reasons/gaps` 表示已知风险和风险资料缺口，
-`execution.status/limitations` 表示当前动作限制，`data_status` 表示本次检查资料是否齐全。
-例如盘口超时但保证金越线时，返回 `risk.status=EXIT_REQUIRED`、`execution.status=BLOCKED`、
-`action=BLOCK`，风险原因仍保留。`CLEAR` 仅表示当前范围内未触发已有风险规则；
-`risk.scope=local_and_public` 不包含账户验证。`READY` 不是交易授权，管理器仍只按顶层 `action` 决定。
-风险证据有缺口但已经发现越线时保留 `EXIT_REQUIRED`，没有已知越线时为 `UNKNOWN`；
-开仓检查的风险越线显示 `ENTRY_BLOCKED`，顶层为 `BLOCK`。
-`checked_at/completed_at/evidence_at` 是本机检查/接口返回时间，不代表交易所原始更新时间。
-超过 10 秒的整次检查、结束时已过 5 秒的盘口都会阻止动作，已经采集到的风险不会被清空。
-`CLOSED` 仅适用于无 pending 且双腿确认为零的本地历史记录，不能证明真实账户无仓。
+`manage_a.py` returns HOLD / EXIT / BLOCK / CLOSED. It recommends exiting `opening`, `closing`, or `needs_close` states when the evidence can be reconciled. Closing is called only with both `--live` and EXIT. Pending orders, account mismatches, insufficient depth, or incomplete evidence produce BLOCK.
 
-退出失败返回 NEEDS_ATTENTION，保留订单和余量，下次须先 recover/核对再处理。
-这是单次运行入口；不会常驻或自行安装 cron。行情、账户检查不是原子快照，IOC 可能部分成交。
+F02 separates the result into `risk.status/reasons/gaps` for known risks and evidence gaps, `execution.status/limitations` for current action constraints, and `data_status` for evidence completeness. For example, a stale book with a margin breach yields `risk.status=EXIT_REQUIRED`, `execution.status=BLOCKED`, and `action=BLOCK`, retaining the risk reason. `CLEAR` only means no existing rule was triggered within the checked scope; `risk.scope=local_and_public` excludes account verification. `READY` is not trading authorization: the manager follows the top-level `action`.
 
-`accounting.py` 把原始成交、账单和每次报告保存在被忽略的 `accounting_a.sqlite`，
-按账户标识哈希、记录类型和 billId 去重；同 ID 内容变更报冲突，旧证据不覆盖。
-用 billId 分页至空页，按订单 ID 核对成交总量和手续费；源头超过保守的 89 天窗口、
-分页失败或记录不一致返回 INVALID_DECLARED_GAP / null，不自动申请长期归档或补造数据。
+When risk evidence is incomplete, a known breach retains `EXIT_REQUIRED`; without a known breach, the result is `UNKNOWN`. Entry-risk breaches produce `ENTRY_BLOCKED` with top-level BLOCK. `checked_at/completed_at/evidence_at` are local check/API-return times, not original exchange update times. Checks exceeding 10 seconds, or books older than 5 seconds at completion, block action without erasing known risks. CLOSED applies only to local historical records with no pending orders and both legs confirmed at zero; it does not prove the real account is flat.
 
-成交现金流和资金费率入账使用 Decimal 计算。币本位现货手续费通过减少可卖币量计入，
-不重复扣费；其它无法计价的费用、未归属成交/账户扣费、未平仓、待确认订单均阻止净收益结论。
-平仓至少一小时后且成交/手续费/账单核对通过才返回 `RECONCILED_AS_OF_QUERY` 和 `net_pnl_usdt`。
-该状态只表示本次 API 窗口查询下已对账，不保证供应商档案之后不会补发资金费率或更正数据，
-可再次查询复核。账户总投入资本尚未分配，所以资金收益率和年化收益率保留 null。
+Failed exits return NEEDS_ATTENTION and retain orders and remaining quantities. Recover/reconcile before handling them again. This is a single-run entry point, not a daemon or cron installer. Market and account checks are not an atomic snapshot, and IOC orders can fill partially.
 
-账单字段和游标依据 [OKX 账户账单文档](https://www.okx.com/docs-v5/en/#trading-account-rest-api-get-bills-details-last-3-months)，
-本轮使用离线 fixture 验证，真实账户档案完整性仍需上线前独立核对。
+`accounting.py` stores raw fills, bills, and reports in the ignored `accounting_a.sqlite`. It deduplicates by hashed account identity, record type, and billId. Changed content under the same ID is a conflict; prior evidence is never overwritten. Pagination follows billId until an empty page, and fill totals and fees are reconciled by order ID. Data beyond the conservative 89-day source window, pagination failures, or inconsistent records yield `INVALID_DECLARED_GAP` / null. The program does not request long-term archives automatically or fabricate missing records.
 
-订单参数依据 [OKX V5 官方文档](https://www.okx.com/docs-v5/en/#order-book-trading-trade-place-order)，
-并离线核对本机 ccxt 4.5.77 生成的请求；这不等于真实账户接口验收。
+Trade cash flows and funding postings use Decimal. Spot fees paid in the base asset reduce sellable quantity and are not deducted twice. Unpriced fees, unattributed fills/account charges, open positions, and unconfirmed orders prevent a net-profit conclusion. `RECONCILED_AS_OF_QUERY` and `net_pnl_usdt` require at least one hour after closing plus successful fill, fee, and bill reconciliation. This status applies only to the queried API window; later funding postings or vendor corrections remain possible, so queries may be repeated. Capital return and annualized return stay null because total strategy capital has not been allocated.
 
-`candidates` 只提供研究筛选，`open` 是手动链路验证入口，不自动按 APR 下单。
+Bill fields and cursors follow the [OKX account bills documentation](https://www.okx.com/docs-v5/en/#trading-account-rest-api-get-bills-details-last-3-months). Validation used offline fixtures; real-account archive completeness still needs separate verification before deployment. Order parameters follow the [OKX V5 order documentation](https://www.okx.com/docs-v5/en/#order-book-trading-trade-place-order), with offline inspection of requests generated by ccxt 4.5.77. This does not constitute real-account API acceptance.
 
-收益公式：历史费率年化 − 两腿开平手续费率 × 365 / 假设持仓天数。
-CSV 的旧字段 `apr_a_net`、pool 的 `net_apr` / `entry_net` 为兼容保留，均仅指此名义估算。
-它未扣实际滑点、基差变化、融资成本，也未以现货资金加保证金等总投入为分母。
-真实策略损益由 accounting 的实际流水核算，不能将扫描估算称为账户净收益率。
+`candidates` is a research filter; `open` is a manual execution-path validation entry point, not an APR-driven automatic trader.
 
-成交量/历史缺失标记 `INVALID_DECLARED_GAP`，原因进入扫描 CSV，APR 留空；不足五天、
-过旧或有内部缺口的历史不进候选。模式 A 要求正费率占比 ≥90%，两腿成交额均 ≥1000万。
-verify 按完整周检查端点和内部间隔，CSV 保留 `symbol` 身份（旧 CSV 不重写）。
+The nominal return estimate is:
 
-`pool.py` 把持仓状态存在 `positions.json`，每次的开/持/平决策追加到 `pool_log.csv`。
-开仓和平仓阈值之间留了滞后带（默认 8% 开 / 3% 平 / 最少持 3 天）——
-换一次仓要付四笔 taker（约 0.22%，按 30 天摊薄是 2.7 个点年化），
-用同一个阈值开平会被噪音推着来回换，比赚的还多。
-
-## 可调参数（都在文件顶部）
-
-### Telegram 运行通知
-
-使用个人插件 Telegram Notifier（目标群由插件私有配置决定）。通过以下入口运行，每次结束后
-发送一条摘要；失败也报告退出码，不发送完整日志、凭据、个人路径或服务器地址。
-
-```bash
-python3 notify_run.py manage_a.py              # 空跑检查与运行报告
-python3 notify_run.py manage_a.py --account    # 真实账户只读检查与报告
-python3 notify_run.py accounting.py ZEC        # 记账与报告
-python3 notify_run.py scan.py                  # 扫描结束报告
+```text
+annualized historical funding rate
+  - total opening/closing fee rate for both legs × 365 / assumed holding days
 ```
 
-本机自动发现唯一已安装插件版本及用户私有配置，不复制 Token 到项目。
-其它环境通过 `TELEGRAM_NOTIFY_SCRIPT`、`TELEGRAM_NOTIFY_CONFIG`、`TELEGRAM_NOTIFY_PYTHON`
-指定插件脚本、私有配置和 Python。也可沿用插件的 `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID`。
-通知不确认时退出码为 2（业务本身失败则保留业务退出码），先检查群消息，禁止盲目重跑交易。
-包装器不会追加 `--live`、自动恢复或启动定时任务；直接运行原脚本不会发送通知。
-人工按次通知继续使用 notify_run.py；F03 新增独立 notify_events.py 读取只读监控快照发送事件，远端 OKX 凭据与通知配置分别保存在私有文件中。
-当前远端服务已启用；在私有环境文件尚未配置前，状态会保持 `CONFIG_MISSING`，不会伪报账户为空。
+Legacy fields `apr_a_net` in CSV and `net_apr` / `entry_net` in the pool are retained for compatibility and refer only to this estimate. It excludes actual slippage, basis changes, and financing costs, and does not divide by total committed capital such as spot funding plus margin. Actual strategy P&L comes from accounting records; scanner estimates are not account net returns.
 
-### 常驻只读持仓监控
+Missing volume or history is marked `INVALID_DECLARED_GAP`, with reasons in scan CSVs and APR left blank. History shorter than five days, stale history, or internal gaps exclude a candidate. Mode A requires at least 90% positive funding observations and at least $10 million turnover on each leg. `verify.py` checks endpoints and internal intervals for full weeks; CSVs retain `symbol` identity, and old CSVs are not rewritten.
 
-`monitor_a.py` 只查询本地实盘状态和 OKX 账户，不调用任何下单、撤单或平仓函数。
-`--account` 需要 `OKX_API_KEY` / `OKX_SECRET` / `OKX_PASSWORD`；缺凭据时明确报告
-`CONFIG_MISSING`，不会把“查不到账户”误报成“无仓位”。每轮 JSON 同时输出到日志并原子写入
-`monitor_a_status.json`（权限 600）。
+`pool.py` stores positions in `positions.json` and appends open/hold/close decisions to `pool_log.csv`. Separate entry and exit thresholds provide hysteresis: defaults are 8% to enter, 3% to exit, and a minimum three-day hold. A rotation incurs four taker fees (approximately 0.22%, or 2.7 annualized percentage points over 30 days). Using one threshold for both entry and exit can cause costly churn.
 
-VPS 使用用户级 systemd（不需要 root）：
+## Configuration (constants at the top of the files)
+
+### Telegram run notifications
+
+The personal Telegram Notifier plugin determines the destination group through private configuration. These entry points send a summary after each run, including an exit code on failure, without full logs, credentials, personal paths, or server addresses:
+
+```bash
+python3 notify_run.py manage_a.py           # Dry-run check and report
+python3 notify_run.py manage_a.py --account # Read-only account check and report
+python3 notify_run.py accounting.py ZEC     # Accounting and report
+python3 notify_run.py scan.py               # Report after scanning
+```
+
+The local setup discovers a unique installed plugin version and private user configuration without copying tokens into the project. Other environments can set `TELEGRAM_NOTIFY_SCRIPT`, `TELEGRAM_NOTIFY_CONFIG`, and `TELEGRAM_NOTIFY_PYTHON`, or use the plugin's `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` variables.
+
+Unconfirmed delivery returns exit code 2, unless the business command itself failed, in which case its exit code is preserved. Check the group message before doing anything else; never blindly rerun a trade. The wrapper does not add `--live`, recover automatically, or start schedules. Running the underlying scripts directly does not send notifications.
+
+Manual per-run notifications continue to use `notify_run.py`. F03 adds the independent `notify_events.py`, which reads monitoring snapshots and sends events. Remote OKX credentials and notification configuration are stored in separate private files. At the documented deployment stage, the remote service was enabled; without its private environment configuration, it remains `CONFIG_MISSING` instead of falsely reporting an empty account.
+
+### Continuous read-only position monitoring
+
+`monitor_a.py` only queries local live state and the OKX account. It does not call order submission, cancellation, or closing functions. `--account` requires the three OKX credentials. Missing credentials produce `CONFIG_MISSING`, never “no positions.” Each cycle emits JSON to the log and atomically writes `monitor_a_status.json` with mode 600.
+
+The VPS setup uses user-level systemd, without root:
 
 ```bash
 mkdir -p ~/.config/funding-arb
 chmod 700 ~/.config/funding-arb
-# 在 ~/.config/funding-arb/monitor.env 中写入三项私有 OKX_* 凭据，chmod 600
+# Put the three private OKX_* credentials in ~/.config/funding-arb/monitor.env; chmod 600
 systemctl --user daemon-reload
 systemctl --user enable --now funding-arb-monitor.service
 systemctl --user status funding-arb-monitor.service
@@ -172,174 +141,127 @@ journalctl --user -u funding-arb-monitor.service -f
 cat ~/funding-arb/monitor_a_status.json
 ```
 
-本服务没有 `--live` 参数，不会自动交易。F03 已将插件发送脚本和私有通知配置单独部署到远端；Token 不进入仓库、日志和发布包。
+This service has no `--live` flag and does not trade automatically. F03 deployed the plugin sender and private notification configuration separately; tokens are excluded from the repository, logs, and release packages.
 
-| 参数 | 默认 | 含义 |
-|------|------|------|
-| `MIN_VOL_USD` | 1000 万 | 24h 成交额门槛，挡掉没法真正建仓的小币 |
-| `LOOKBACK_DAYS` | 7 | 历史均值回看天数 |
-| `MIN_HIST_DAYS` | 5 | 历史不足这么多天不进榜，挡掉新上市合约 |
-| `MIN_SPREAD_APR` | 10% | 跨所价差年化低于此不进榜 |
-| `MIN_SAME_SIGN` | 85% | 两腿的费率方向稳定性都得过线 |
-| `HOLD_DAYS` | 30 | 估算净收益时假设的持仓天数，开平成本按这个摊薄 |
-| `MAJORS` / `MAJORS_ONLY` | 32 个主流币 / True | 模式 A 的币池 |
-| `STABLES` | USDT/USDC/USD | 认哪些稳定币做保证金 |
+| Parameter | Default | Meaning |
+|---|---|---|
+| `MIN_VOL_USD` | $10 million | Minimum 24-hour turnover to filter out illiquid assets |
+| `LOOKBACK_DAYS` | 7 | Historical averaging window |
+| `MIN_HIST_DAYS` | 5 | Minimum history for ranking, excluding newly listed contracts |
+| `MIN_SPREAD_APR` | 10% | Minimum annualized cross-exchange spread for ranking |
+| `MIN_SAME_SIGN` | 85% | Required funding-direction stability for both legs |
+| `HOLD_DAYS` | 30 | Assumed holding period for amortizing entry/exit costs |
+| `MAJORS` / `MAJORS_ONLY` | 32 major assets / True | Mode A asset universe |
+| `STABLES` | USDT/USDC/USD | Recognized stablecoin collateral currencies |
 
-## 踩过的坑（这些是这个脚本存在的理由）
+## Data pitfalls that motivated this project
 
-裸调 ccxt 拿到的数据有一堆陷阱，每一条都会让你算出好看但假的年化：
+Raw ccxt responses contain traps that can produce attractive but misleading annualized estimates. The following describe observations recorded during development.
 
-**结算周期交易所会报错。** Binance 的 `fetch_funding_rates` 走 premiumIndex 接口，
-不返回 `fundingIntervalHours`，ccxt 给 `None`。如果按 8 小时兜底，而实际是 4 小时，
-年化就少算一半。本脚本改用**历史时间戳的间隔中位数**倒推真实周期，发现被 limit
-截断还会补拉一次。
+**Reported settlement intervals can be missing or wrong.** Binance's `fetch_funding_rates` uses premiumIndex, which does not return `fundingIntervalHours`, leaving ccxt with `None`. Assuming eight hours when the actual interval is four halves the annualized estimate. The scanner infers intervals from the median gap between historical timestamps and makes an additional fetch when it detects limit truncation.
 
-**合约的 `baseVolume` 是张数，不是币量。** 要乘 `contractSize` 才是币量。
-mexc 的 BTC 一张 0.0001 币，不乘就虚高一万倍——曾经算出 22 万亿美元的日成交额。
-`quoteVolume` 各所口径也不统一（okx 返回的是币量不是美元）。本脚本两种算法都跑，取小的。
+**Contract `baseVolume` can be contract count, not coin quantity.** Multiply by `contractSize` to obtain asset quantity. A MEXC BTC contract represented 0.0001 BTC; omitting this conversion overstated volume by 10,000 times, once producing an implausible $22 trillion daily turnover. `quoteVolume` conventions also differ; the observed OKX value represented coin quantity rather than dollars. The scanner calculates volume both ways and uses the smaller value.
 
-**瞬时费率没有意义。** 单期费率乘 1095 折出来的「年化 500%」到处都是，
-7 天一平大概率掉到几十。而且要看**同号占比**：过去 7 天费率保持同一方向的期数比例，
-50% 等于抛硬币，开仓吃两期就被反向费率吐回去还赔手续费。
+**A single funding observation is not a reliable annualized estimate.** Multiplying a single rate by 1,095 can suggest 500% APR, while a seven-day average may be only tens of percent. Direction stability also matters: the same-sign ratio measures the proportion of periods with the same funding direction. Around 50% offers little directional persistence; reversed funding can erase receipts while fees remain.
 
-**新上市合约的「7 天均值」可能只有 4 期数据。** 上市初期费率剧烈波动是常态，
-等它稳下来就没了。所以有 `MIN_HIST_DAYS`。
+**A newly listed contract's “seven-day average” may contain only four observations.** Early rates can be highly volatile and disappear as the market settles. This motivates `MIN_HIST_DAYS`.
 
-**币名不等于合约。** 同一个所的 BTC 可能有 USDT / USDC / USD1 好几种本位，
-按币名配对会把 USDC 合约和 USDT 合约当成一个东西。本脚本按 (币, 本位) 区分。
+**An asset ticker is not a contract identity.** BTC may have USDT, USDC, or USD1 contracts on the same exchange. Matching by ticker alone conflates distinct contracts. The scanner distinguishes `(asset, settlement currency)`.
 
-**有些所的费率是假的。** bingx 一半以上合约的 `lastFundingRate` 直接返回默认值
-0.0001，37 行里 23 行年化一模一样。已从列表移除。
+**Some responses appeared to contain placeholder rates.** In the recorded BingX sample, more than half the contracts returned `lastFundingRate=0.0001`; 23 of 37 rows had identical annualized rates. BingX was removed from the configured list.
 
-## 关于本位（settle）
+## Settlement currency (`settle`)
 
-跨所对腿时两边保证金币种**可以不同**：在 USDC 本位的所做多 BTC、在 USDT 本位的所做空 BTC，
-BTC 敞口依然中性，只是同时持两种稳定币，多担一点脱锚风险（历史极端情况约 0.1~0.3%）。
-所以 backpack / hyperliquid / pacifica / woofipro 这些 USDC 本位的场子照样能配对。
+Cross-exchange legs may use different collateral currencies. A BTC long on a USDC venue and a BTC short on a USDT venue can offset BTC exposure while retaining stablecoin depeg risk. The original notes cited historical differences of approximately 0.1–0.3%; this is not a bound on possible depegs. USDC venues such as backpack, hyperliquid, pacifica, and woofipro can therefore participate in cross-exchange matching.
 
-模式 A 不行——现货和永续必须同本位，用 USDT 买的现货对不上 USDC 保证金的空单。
+Mode A requires matching spot and perpetual settlement currencies: the implementation does not match USDT-funded spot against a USDC-collateralized short.
 
-## 交易所
+## Exchanges
 
-已接入：binance、bybit、okx、bitget、gate、coinex、bitmex、krakenfutures、
-hyperliquid、aster、pacifica、woofipro、backpack、mexc、kucoinfutures、phemex
+Configured integrations: binance, bybit, okx, bitget, gate, coinex, bitmex, krakenfutures, hyperliquid, aster, pacifica, woofipro, backpack, mexc, kucoinfutures, and phemex.
 
-没接入的和原因：
+Recorded exclusions and reasons:
 
-- **htx** — ccxt 只实现了它币本位的批量 funding，linear 直接抛 `NotSupported`
-- **bingx** — 费率数据是假的，见上
-- **lighter** — ccxt 不支持它的 funding 历史
-- **paradex / extended / apex** — 连单个 funding 接口都没有
-- **dydx** — 没有现货
-- **bitrue / latoken** — 没有 funding 历史
+- **htx** — ccxt implemented bulk funding only for inverse contracts; linear contracts raised `NotSupported`.
+- **bingx** — apparent placeholder funding-rate data, as described above.
+- **lighter** — no funding-history support in the ccxt integration used.
+- **paradex / extended / apex** — no individual funding endpoint in the integration used.
+- **dydx** — no spot market.
+- **bitrue / latoken** — no funding history.
 
-Blofin 当前因公开接口连接问题排除。
+Blofin was excluded because of public-endpoint connection problems. Venues without bulk `fetchFundingRates` support (backpack, mexc, kucoinfutures, and phemex) are queried per symbol, which is slower.
 
-没有批量 `fetchFundingRates` 的所（backpack、mexc、kucoinfutures、phemex）
-会逐个 symbol 拉，慢一些但能出数。
+## Disclaimer
 
-## 免责
-
-这是个人研究与执行原型项目，不构成投资建议。资金费率套利看起来中性，
-实际有爆仓、下架、单腿失败、交易所跑路等风险，真金白银之前请自己验证每一个数字。
+This is a personal research and execution prototype, not investment advice. Funding arbitrage can appear neutral while still carrying liquidation, delisting, single-leg failure, and exchange failure risks. Independently verify every number before using real funds.
 
 ## License
 
 MIT
 
-### F03 常驻事件通知
+### F03 — Continuous event notifications
 
-`funding-arb-notify.service` 每 10 秒独立读取 `monitor_a_status.json`，不直接访问账户或调用交易入口。
-状态、异常类别、本地阶段/确认余量/pending、快照中已有保证金与清算越线类别发生变化时通知。
-相同事件跨重启去重；变化频繁时全局最少 300 秒发送一次，期间合并为最新快照，不保证逐条发送瞬态事件。
-单纯时间戳和未越线的行情变化不触发消息。风险阈值沿用 check_a.py；仅能报告监控快照已包含的证据。
+`funding-arb-notify.service` independently reads `monitor_a_status.json` every 10 seconds without accessing the account or invoking trading entry points. It notifies on changes to status, exception category, local phase/confirmed remaining quantity/pending state, and margin or liquidation breach categories already present in the snapshot. Identical events are deduplicated across restarts. Frequent changes are coalesced into the latest snapshot, with at least 300 seconds between sends globally; transient events are not guaranteed individual delivery. Timestamp-only changes and market changes without a threshold breach do not trigger messages. Risk thresholds come from `check_a.py`, and reports are limited to snapshot evidence.
 
-发送前将意图原子落盘为 ATTEMPTING，成功为 CONFIRMED，无法确认则 DELIVERY_UNKNOWN。
-中断留下 ATTEMPTING 或未知回执时，同一事件不重发；此策略可能漏送而避免盲目重复。
-状态文件损坏时暂停通知，不自动清空。通知异常只写白名单状态到独立服务日志，不重跑监控或业务。
-通知状态 `notify_events_state.json` 权限 600、已忽略；不要删除它来重试未知投递。
+Before sending, intent is atomically persisted as ATTEMPTING; confirmed delivery becomes CONFIRMED, otherwise DELIVERY_UNKNOWN. An interrupted ATTEMPTING state or unknown receipt prevents resending the same event. This trades possible missed delivery for avoiding blind duplicates. Corrupt state pauses notifications instead of resetting it. Notification failures write only allowlisted status to the independent service log, without rerunning monitoring or business commands. The ignored `notify_events_state.json` has mode 600; do not delete it to retry uncertain delivery.
 
-消息只包含固定状态、枚举原因、受限资产代码及数字；不透传原始异常、账户标识或配置。
-本地 open/closed 阶段只是观察，不作为成交证明。快照超过 180 秒或来自未来时不发送旧事实；
-定时报表、外部失联告警属于 F06，F03 尚不提供。通知器失联不能依靠自己告警。
+Messages contain only fixed statuses, enumerated reasons, restricted asset codes, and numbers. Raw exceptions, account identifiers, and configuration are not forwarded. Local open/closed phases are observations, not fill evidence. Snapshots older than 180 seconds or dated in the future are not sent as current facts. Scheduled reports and external-loss alerts belong to F06; F03 cannot detect its own loss of connectivity.
 
-远端配置 `~/.config/funding-arb/notify.env` 指定 TELEGRAM_NOTIFY_SCRIPT、TELEGRAM_NOTIFY_PYTHON、
-TELEGRAM_NOTIFY_CONFIG；通知凭据在单独 600 权限文件，不能粘贴进仓库或服务单元。
-可用 `systemctl --user status funding-arb-notify.service` 检查状态，
-用 `journalctl --user -u funding-arb-notify.service -n 20` 查看白名单回执。
-当前实测、版本哈希及部署边界见 artifacts/F03/REPORT.md。
+Remote `~/.config/funding-arb/notify.env` sets `TELEGRAM_NOTIFY_SCRIPT`, `TELEGRAM_NOTIFY_PYTHON`, and `TELEGRAM_NOTIFY_CONFIG`. Notification credentials belong in a separate mode-600 file, never in the repository or service unit. Inspect with `systemctl --user status funding-arb-notify.service` and `journalctl --user -u funding-arb-notify.service -n 20`. Recorded validation, version hashes, and deployment boundaries are in `artifacts/F03/REPORT.md`.
 
-### F04 资金费与成交增量采集
+### F04 — Incremental funding and fill collection
 
-`accounting.py` 保留按本地交易轮次核算入口，新增账户级原始证据入口：
+`accounting.py` retains per-cycle accounting and adds account-wide raw-evidence collection:
 
 ```bash
-# 凭据需已加载到当前进程环境；日期为 UTC。此命令仅示例，不会自动执行。
+# Load credentials into the process environment first; dates are UTC. Examples only.
 umask 077
 python3 accounting.py --account-sync --since 2026-09-08
-# 持续采集；Ctrl+C 停止，不安装任何后台服务。
+# Continuous collection; Ctrl+C stops it. No background service is installed.
 python3 accounting.py --account-sync --since 2026-09-08 --interval 300
 ```
 
-账户采集不要求已有策略持仓；`EVIDENCE_COLLECTED` 只证明指定接口窗口已查询，收益为 null。
-SQLite 新增 collection_windows 记录各账户/数据流的时间覆盖与分页游标；成功页与游标同时提交。
-重复 ID 不重复入库。evidence_conflicts 保存更正观察，原 evidence 不覆盖；存在冲突时阻止净收益结论，
-不自动清除冲突或选取“最新值”。重叠复查最近七天，七天前迟发/更正需明确扩大复查窗口才能发现。
+Collection does not require strategy positions. `EVIDENCE_COLLECTED` only proves that the specified endpoint window was queried; profit remains null. SQLite `collection_windows` records coverage and pagination cursors by account/data stream, committing successful pages and cursors together. Duplicate IDs are not reinserted. `evidence_conflicts` preserves observed corrections without overwriting original evidence. Conflicts block net-profit conclusions; they are neither cleared automatically nor resolved by choosing the newest value. The last seven days are rechecked with overlap; older late postings or corrections require explicitly widening the review window.
 
-89 天之外若已有完整的本地查询覆盖，可继续使用真实证据；旧 evidence 行本身不证明窗口完整，
-没有覆盖证明或采集中断跨越源窗口时保留 INVALID_DECLARED_GAP/null，不补造、不自动申请长历史。
-账户级 ALL:SPOT/ALL:SWAP 与按合约采集分别记录覆盖，当前不自动将账户级覆盖转成策略轮次覆盖。
-本版本未安装采集服务，常驻调度整合仍在 F12；目前的远端验证副本和独立原始数据库见 F04 报告。
+Beyond 89 days, genuine evidence remains usable if complete local query coverage already exists. Old evidence rows alone do not prove complete coverage. Missing coverage or collection interruptions spanning the source window remain `INVALID_DECLARED_GAP` / null, without fabrication or automatic long-history requests. Account-wide `ALL:SPOT` / `ALL:SWAP` and per-contract coverage are recorded separately; account-wide coverage is not automatically converted to strategy-cycle coverage. This delivery installed no collection service; continuous scheduling integration was deferred to F12. The F04 report records the remote validation copy and separate raw database.
 
-### F05 只读持仓收益与资金报表
+### F05 — Read-only position P&L and capital reports
 
-`python3 portfolio_a.py --db accounting_a.sqlite --markdown` 输出账户与策略分开的报表（省略 --markdown 输出 JSON）。
-当前进程需有 OKX 三项凭据；systemd 环境不会自动注入普通 SSH 终端。该入口不包含 --live、不下单、不写账目库。
-收益需要 F04 同账户、同合约与时段覆盖证据，以及本地确认订单；没有本策略记录不自动认领外部仓位。
+`python3 portfolio_a.py --db accounting_a.sqlite --markdown` produces separate account and strategy reports; omit `--markdown` for JSON. The process needs the three OKX credentials; a systemd environment is not automatically inherited by an ordinary SSH shell. This entry point has no `--live`, places no orders, and does not write to the accounting database. P&L requires F04 evidence for the same account, contract, and period, plus locally confirmed orders. External positions are not automatically attributed to this strategy.
 
-分别展示已入账资金费、原币手续费、移动加权成本下已实现/未实现损益、盘口估计退出成本与退出后净损益。
-现货币量手续费已经影响净数量及成本，不重复扣费；其他无换算依据的费用保留缺口。
-当前估值使用新鲜盘口中间价，退出使用双腿 VWAP 和账户 taker 费率；不是成交或结算承诺。
-已关闭且证据满足原会计校验时才显示查询时点已平仓净损益。
+Reports separate posted funding, fees in their original currencies, realized/unrealized P&L under moving weighted-average cost, estimated exit costs, and estimated post-exit net P&L. Base-asset spot fees already affect net quantity and cost and are not deducted twice. Unconvertible fees remain gaps. Valuation uses fresh book midprices; exit estimates use both legs' VWAP and account taker rates. Neither is a fill or settlement guarantee. Closed net P&L as of query is shown only for closed positions satisfying the original accounting checks.
 
-现货成本/市值用 USDT，OKX 账户净资产/初始保证金用 USD，分开显示。账户净资产含外部资产；
-无策略资本分配记录时 strategy_nav_usdt、capital_return 为 null，不能以账户总净值冒充策略回报。
-实例、验证和远端独立报表位置见 artifacts/F05/REPORT.md。报价、费率、覆盖或归属不足时字段保持 null。
+Spot cost/value is shown in USDT, while OKX account equity/initial margin is shown separately in USD. Account equity includes external assets. Without strategy capital allocation records, `strategy_nav_usdt` and `capital_return` remain null; total account equity cannot stand in for strategy return. Examples, validation, and the remote report location are in `artifacts/F05/REPORT.md`. Insufficient quotes, fees, coverage, or attribution leave fields null.
 
+### F06 — Scheduled reports and an independent watchdog
 
-### F06 定时报告与独立 watchdog
+An independent systemd oneshot/timer runs `report_watch.py` every minute to check monitoring snapshots, notification heartbeats, and service status. The stale threshold is 180 seconds; exception changes/recovery have a 300-second cooldown. A running process with a stalled snapshot still triggers an alert. Checks on the same machine cannot cover loss of the entire VPS or network.
 
-`report_watch.py` 由独立 systemd oneshot/timer 每分钟触发，检查监控快照、通知心跳与服务状态。阈值 180 秒；异常变化/恢复冷却 300 秒。进程存在但快照不更新也会告警。同机检查不能覆盖整台 VPS 或网络失联。
+Defaults are hourly summaries and a daily report at 08:00 Beijing time, including that hour's summary. `--summary-hours 4` changes the interval; `0` keeps only daily reports and exceptions. Restarts report the current period without flooding historical messages. Persisted send intent prevents duplicates; unknown receipts are not retried. Do not casually delete `report_watch_state.json`.
 
-默认每小时摘要、北京时间 08:00 日报，日报包含当时摘要。支持 `--summary-hours 4` 或 `0`（仅日报和异常）；停机重启只报告当前时段，不补发大量历史消息。持久发送意图防重，未知回执不重试，不能随意删除 report_watch_state.json。
+Daily reports require F04 coverage of the full calendar day for the same account; gaps remain null. Account funding and fees are not strategy daily profit, for which complete evidence was not yet available. Reports query read-only and do not start collection. The local default is `accounting_a.sqlite`; the deployment explicitly reads the separate existing F04 evidence database. Collection scheduling was deferred to F12.
 
-日报要求 F04 同账户完整自然日覆盖；缺口保持 null。账户资金费与费用不代表策略日收益，当前日级策略收益尚无完整证据。报表只读查询，未启动采集任务；默认本地数据库 accounting_a.sqlite，线上显式读取既有 F04 独立证据库。采集调度尚待 F12。
+The deployment uses modules in a dedicated release directory, leaving trading modules in the original runtime directory unchanged. `funding-arb-reports.timer` should be enabled/active. An inactive/dead oneshot service after completion is normal; check `Result=success`. Delivery and rollback details are in `artifacts/F06/REPORT.md`.
 
-线上使用专用发布目录中的模块，原运行目录交易模块不变。`funding-arb-reports.timer` 应 enabled/active；oneshot 的 service 在完成后 inactive/dead 属正常，检查 Result=success。详细交付与回退见 artifacts/F06/REPORT.md。
+### F01–F06 — Combined review status
 
+The 2026-09-09 review fixed five local issues, with 198 checks passing; patches had not yet been deployed at that review stage. Differences and limitations are in `artifacts/F01-F06-review/REPORT.md`. Historical regression checks were restored to `checks/funding_arb_regression.py` and `checks/funding_modules_regression.py`, removing their dependency on temporary directories.
 
-### F01–F06 综合复核状态
+### F07 — Persistent execution state and startup gates
 
-2026-09-09 复核修复 5 处本地问题，198 项检查通过；修补尚未部署。详细差异与限制见 artifacts/F01-F06-review/REPORT.md。历史回归已恢复到 checks/funding_arb_regression.py 和 checks/funding_modules_regression.py，不再依赖临时目录。
+New cycles persist trade IDs, both legs' targets and confirmed remaining quantities, order identity/confirmation state, fees, and exposure. `trade_a.py startup` checks dry-run state; `--live startup` queries the real account and maintains execution locks/path binding without placing orders. Open or unknown orders, unfinished actions in other assets, account-mode/ownership mismatches, or reconciliation failures block new actions.
 
+Open/close/recover function entry points acquire both state and account locks. Account locks under `~/.local/state/funding-arb/execution-locks/` are shared across checkouts for the same user on the same host and bind to one state path. Do not delete lock files to bypass binding; there is no cross-host guarantee. After interruption following order acceptance, only the original client order ID may be queried; the order must not be resubmitted. Observed nonterminal fills remain separate from terminally confirmed quantities.
 
-### F07 持久执行状态与启动门槛
+Unversioned legacy state remains readable; modification requires manually reviewed migration. This delivery did not migrate, deploy, or enable live trading. Default dry run is not the F08 market-data paper model. Acceptance boundaries are in `artifacts/F07/REPORT.md`; F07 was pending review at this stage.
 
-新周期保存交易 ID、两腿目标与确认余量、订单身份/确认状态、费用与敞口。`trade_a.py startup` 检查空跑状态；`--live startup` 查询真实账户并维护执行锁/路径绑定，不下单。挂单、未知订单、其他币种未完成动作、账户模式/归属或对账不符时暂停新增动作。
+### Recorded deployment status — 2026-09-09
 
-开/平/recover 的函数入口统一取得状态锁与账户锁。账户锁位于 `~/.local/state/funding-arb/execution-locks/`，同机同用户的不同 checkout 共用且绑定唯一状态路径；不可删除文件绕过绑定，也不提供跨主机保证。订单接受后中断只能查询原客户订单号，不能重发；已知但未终结的成交观察与终结确认余量分开。
+F01–F07 and the combined/F07 review patches were deployed to release directory `f01-f07-20260909-586bd8ed1c65`. Monitoring, event notifications, and scheduled reports were restored. The F07 executor was installed without starting trading. Earlier “not deployed” statements describe historical delivery stages. Acceptance, hashes, and rollback boundaries are in `artifacts/deploy-F01-F07-20260909/REPORT.md`.
 
-旧无版本状态仍可只读查看，修改须先人工审阅迁移；本次不迁移、不部署、不启用实盘。默认空跑还不是 F08 的真实行情 paper 模型。验收与边界见 artifacts/F07/REPORT.md，F07 待审阅。
+## F08 — Simulated fills using real order books (local delivery)
 
-
-### 最新部署状态（2026-09-09）
-
-F01–F07 与综合复核/F07 复核修补均已部署，发布目录 f01-f07-20260909-586bd8ed1c65。监控、事件通知、定时报表已恢复；F07 执行器仅安装，未启动交易。此前“未部署”段落为历史交付状态。验收、哈希和回退边界见 artifacts/deploy-F01-F07-20260909/REPORT.md。
-
-
-## F08 真实盘口模拟成交（本地交付）
-
-独立命令只读取公共行情，不需要 OKX 凭据。首次初始化显式填写模拟本金及费用率；以下费率只是示例假设，不代表你的真实账户等级。
+These independent commands use only public market data and need no OKX credentials. Initialization explicitly sets simulated capital and fees. The following fee rates are examples, not your account's actual tier:
 
 ```bash
 python3 -B paper_a.py init --cash 10000 --spot-fee 0.001 --perp-fee 0.0005
@@ -348,39 +270,36 @@ python3 -B paper_a.py status
 python3 -B paper_a.py close BTC
 ```
 
-`--notional` 是单腿目标 USDT 金额，两腿合计需要额外资金占用及费用。盘口不足会部分成交，余量取消；`needs_close` 保留已成交仓位，需要继续执行 close 处理剩余数量。`pending` 表示落盘过程未完成，禁止自动重试或删除账本；应先核查意图和状态。重复 init 不覆盖已有账本。
+`--notional` is the target USDT amount for one leg; both legs require additional capital and fees. Insufficient depth produces partial fills and cancels the remainder. `needs_close` retains filled positions for subsequent close operations. `pending` means persistence is incomplete: do not automatically retry or delete the ledger; inspect intent and state first. Repeated init does not overwrite an existing ledger.
 
-状态在项目目录 `paper_a_state.json`，与实盘状态隔离。永续采用 1 倍初始名义资金占用，费用均按 USDT 模拟；没有资金费结算、动态保证金/强平、连续调度或实盘成交保证。详见 [F08 验收报告](artifacts/F08/REPORT.md)。
+State is isolated from live trading in `paper_a_state.json`. Perpetuals reserve 1x initial notional and all fees are simulated in USDT. This F08 stage did not include funding settlement, dynamic margin/liquidation, continuous scheduling, or any guarantee of live fills. See the [F08 acceptance report](artifacts/F08/REPORT.md).
 
-F08 复核已修复限价取整的深度遗漏及平仓资金检查，详见 [复核报告](artifacts/F08-review/REPORT.md)。现货出售所得可支付模拟费用，平空同时核算释放保证金与价差亏损；资金不足时保留持仓并拒绝该次模拟成交。
+The [F08 review](artifacts/F08-review/REPORT.md) fixed depth omitted by limit-price rounding and close-capital checks. Spot sale proceeds can pay simulated fees; closing the short accounts for released margin and price losses. Insufficient capital preserves the position and rejects that simulated fill.
 
-
-## F09 单周期模拟资金费（本地复核及公共接口验证通过）
+## F09 — Single-period simulated funding (local review and public-API validation passed)
 
 ```bash
-python3 -B paper_a.py settle BTC --at-ms <实际结算时间的毫秒时间戳>
+python3 -B paper_a.py settle BTC --at-ms <actual_settlement_timestamp_in_milliseconds>
 python3 -B paper_a.py status
 ```
 
-用历史资金费接口的 fundingTime 替换占位符，至少等待该分钟结束。按当时已确认空仓、实际结算费率和该分钟标记价格开盘价计算纸面资金费；分钟开盘价是模拟约定，不代表精确真实账单。重复调用不会重复支付。
+Replace the placeholder with `fundingTime` from historical funding data and wait until at least that minute has ended. Paper funding uses the confirmed short position at that time, the actual settled rate, and that minute's opening mark price. The minute-open convention is a simulation assumption, not an exact account bill. Repeated calls do not pay twice.
 
-结果保存在 paper_a_state.json 的 funding 字段；POSTED 为模拟记账，NO_POSITION 为当时无仓位，INVALID_DECLARED_GAP/payment_usdt=null 为缺数据。缺口不改变现金。旧 F08 订单缺执行时间不会自动补写或猜测，单个周期成功不代表全历史完整覆盖。F09 没有启动定时器或改真实账簿。详见 [F09 报告](artifacts/F09/REPORT.md)。
+Results are stored in the `funding` field of `paper_a_state.json`: POSTED means simulated posting, NO_POSITION means no position at that time, and `INVALID_DECLARED_GAP` / `payment_usdt=null` means missing data. Gaps do not change cash. Missing execution times on old F08 orders are not backfilled or guessed. One successful period does not establish complete historical coverage. F09 started no timer and changed no real ledger. See the [F09 report](artifacts/F09/REPORT.md).
 
-F09 公共接口补验已通过：真实已结算费率和标记价格驱动合成持仓记账、重启去重；全套 268 项检查通过。本轮未部署、未真实交易，详见 [F09 复核报告](artifacts/F09-review/REPORT.md)。
+Additional public-API validation passed: real settled rates and mark prices drove accounting for synthetic positions, including restart deduplication. The full suite passed 268 checks. This validation did not deploy or trade live. See the [F09 review](artifacts/F09-review/REPORT.md).
 
-
-## F10 按金额的 OKX 净收益排名（本地交付）
+## F10 — OKX net-return ranking by notional (local delivery)
 
 ```bash
 python3 -B rank_a.py BTC ETH --notional 1000 --hold-hours 720 --margin-ratio 1 --reserve-usdt 100 --basis-stress-bps 50
 ```
 
-复用既有 OKX 环境凭据，只读取账户费率和行情，输出 JSON。保证金比例和备用金是明确的场景参数，不代表账户实际可用资金。按预计净收益/总资金占用排名，缺数据、深度不足或净收益非正时排除；可全部返回 HOLD_CASH。CANDIDATE 只供审阅，不授权执行。
+Uses existing OKX environment credentials to read account fee rates and market data, returning JSON. Margin ratio and reserves are explicit scenario assumptions, not actual available account capital. Ranking uses expected net profit divided by total committed capital. Missing data, insufficient depth, or nonpositive estimated net profit exclude candidates; all results may be HOLD_CASH. CANDIDATE is for review, not execution authorization.
 
-当前预测与历史已结算费率分列，四笔盘口/费用成本、预计收入、净收益、回本天数和基差压力都有明细。预测假设与数据限制见 [F10 报告](artifacts/F10/REPORT.md)。旧 scan.py 仍是原研究扫描入口，未替换为自动交易逻辑。
+Current forecasts and historically settled rates are separate. Four-trade book/fee costs, expected income, net profit, break-even days, and basis stress are itemized. See the [F10 report](artifacts/F10/REPORT.md) for assumptions and limitations. `scan.py` remains the original research scanner, not automatic trading logic.
 
-
-## F11 paper 组合预算（本地交付）
+## F11 — Paper portfolio budgets (local delivery)
 
 ```bash
 python3 -B allocate_a.py reserve ranking.json --per-coin-gross-usdt 2500 --total-gross-usdt 5000 --max-positions 2 --buffer-usdt 100
@@ -388,21 +307,20 @@ python3 -B allocate_a.py execute <reservation_id>
 python3 -B allocate_a.py release <reservation_id>
 ```
 
-额度按两腿名义之和，例值需自行确定；读取 F10 原始 JSON，paper 费率须一致且保证金比例为 1。预留扣除其他候选可用资金，部分成交保留实际占用、释放剩余。未知订单阻止继续执行。报价与预留仅有效 5 秒，过期需 release 并重新报价；F12 尚未提供自动串联。首次配置后直接 paper open 禁止绕过限额，close 保留。详见 [F11 报告](artifacts/F11/REPORT.md)。
+Limits apply to the sum of both legs' notionals; choose your own values. Input is raw F10 JSON, with matching paper fees and a margin ratio of 1. Reservations reduce capital available to other candidates. Partial fills retain actual capital usage and release the remainder. Unknown orders block execution. Quotes and reservations last only five seconds; expired reservations require release and a fresh quote. At this delivery stage, F12 automatic orchestration was not yet available. After initial configuration, direct paper open cannot bypass limits; close remains available. See the [F11 report](artifacts/F11/REPORT.md).
 
-
-## F12 paper 主循环（本地交付）
+## F12 — Paper main loop (local delivery)
 
 ```bash
 python3 -B paper_loop.py BTC ETH --cycles 10 --interval 1 --notional 1000 --hold-hours 720 --per-coin-gross-usdt 2500 --total-gross-usdt 5000 --max-positions 2 --buffer-usdt 100 --basis-stress-bps 50
 ```
 
-先初始化 F08 paper 账本、配置账户只读费率凭据，保持 F11 限额与费率一致。扫描独立进程，主循环先检查已有持仓，后消费排名及资金费资料，再按预算模拟执行。默认一轮，--cycles 0 为持续模拟；首次 WAIT_SCAN 正常。Ctrl-C 停止，不平仓。状态输出在 paper_loop_status.json。
+First initialize the F08 ledger and configure read-only account fee credentials, keeping F11 limits and fee assumptions consistent. Scanning runs in a separate process. The main loop checks existing positions, consumes ranking/funding data, and simulates execution within budget. The default is one cycle; `--cycles 0` runs continuously. An initial WAIT_SCAN is normal. Ctrl-C stops the process without closing positions. Status is written to `paper_loop_status.json`.
 
-额度为示例；没有 live 路径或自动退出，缺口和未完成执行阻止新仓。报价过期不执行，网络请求仍可能延迟。详见 [F12 报告](artifacts/F12/REPORT.md)。
+Limits are examples. This F12 delivery has no live path or automatic exits. Evidence gaps and incomplete execution block new positions. Expired quotes are not executed, though network calls may still be delayed. See the [F12 report](artifacts/F12/REPORT.md).
 
-F10—F12 联合复核已修复执行数量与排名脱节、结算边界、过期持仓检查和整批预留归属问题，322 项检查通过；补丁尚未部署。详见 [联合复核报告](artifacts/F10-F12-review/REPORT.md)。
+The combined F10–F12 review fixed mismatches between executed and ranked quantities, settlement boundaries, stale position checks, and batch reservation ownership. All 322 checks passed; these patches were not yet deployed at that review stage. See the [combined review](artifacts/F10-F12-review/REPORT.md).
 
-## F13 自动退出（本地待审阅）
+## F13 — Automatic exits (local, pending review)
 
-在现有 paper_loop.py 命令后添加 `--auto-exit` 才启用；可选 `--max-hold-hours 720` 为明确最长持有时限，默认不设。优先处理敞口风险、已确认退出余量、负资金费率及显式期限；缺数据或未知订单暂停。退出使用原有保守盘口限制。当前线上服务尚未启用，详见 [F13 报告](artifacts/F13/REPORT.md)。
+Enable only by appending `--auto-exit` to the existing `paper_loop.py` command. Optional `--max-hold-hours 720` sets an explicit maximum holding period; none is set by default. Exit priorities are exposure risk, confirmed remaining exit quantities, negative funding, and an explicit holding deadline. Missing data or unknown orders pause actions. Exits retain the existing conservative order-book bounds. The online service had not enabled this feature at the documented stage. See the [F13 report](artifacts/F13/REPORT.md).
